@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 URL = os.environ.get("RENDER_EXTERNAL_URL")
 PORT = 8000
-API_BASE_URL = "https://revolshtitil-book-recommendation-bot.hf.space"  # Ваш Space
+API_BASE_URL = "https://revolshtilil-book-recommendation-bot.hf.space"  # Ваш Space
 
 # --- Хранилище результатов поиска для каждого пользователя ---
 user_search_results = {}  # {user_id: [{"id": ..., "title_ru": ...}]}
