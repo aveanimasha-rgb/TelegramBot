@@ -290,9 +290,17 @@ async def recommend_personal(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
         await do_recommend_personal(update, context, api_id, book_id)
         return
-    context.user_data["awaiting_rec_personal"] = True
+    # Нет аргументов – даём инструкцию
     await update.message.reply_text(
-        "📚 Введите ID книги, для которой хотите получить персональные рекомендации:",
+        "📚 <b>Как получить персональные рекомендации</b>\n\n"
+        "1️⃣ Найдите интересующую вас книгу командой:\n"
+        "   <code>/find &lt;часть названия&gt;</code>\n"
+        "   Например: <code>/find Властелин</code>\n\n"
+        "2️⃣ В результатах поиска вы увидите <b>ID книги</b> (число).\n\n"
+        "3️⃣ Отправьте команду с этим ID:\n"
+        "   <code>/rec_personal &lt;ID&gt;</code>\n"
+        "   Например: <code>/rec_personal 12345</code>\n\n"
+        "🔹 <i>Также вы можете просто отправить ID книги из последнего поиска, и я дам обычные рекомендации (без учёта профиля).</i>",
         parse_mode='HTML',
         reply_markup=get_main_keyboard()
     )
