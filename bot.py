@@ -3,11 +3,12 @@ import asyncio
 import logging
 import sqlite3
 import requests
+import re
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # --- Настройка логирования ---
@@ -57,6 +58,21 @@ def delete_api_user_id(telegram_id):
 
 init_sessions_db()
 
+# --- Вспомогательная функция для безопасного HTML (экранирование) ---
+def escape_html(text: str) -> str:
+    """Заменяет символы, опасные для HTML-разметки Telegram."""
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+# --- Клавиатура с кнопками быстрых команд ---
+def get_main_keyboard():
+    buttons = [
+        [KeyboardButton("/start")],
+        [KeyboardButton("/find"), KeyboardButton("/rec_personal")],
+        [KeyboardButton("/register"), KeyboardButton("/login"), KeyboardButton("/my_id")],
+        [KeyboardButton("/rate"), KeyboardButton("/my_ratings"), KeyboardButton("/logout")]
+    ]
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+
 # --- Вспомогательная функция для загрузки api_user_id в context.user_data ---
 async def ensure_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
@@ -67,32 +83,32 @@ async def ensure_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("api_user_id", None)
     return api_user_id
 
-# --- Обработчики команд ---
+# --- Обработчики команд (все с HTML-разметкой и клавиатурой) ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ensure_session(update, context)
     text = (
-        "📚 Книжный рекомендательный бот\n\n"
-        "🔹 Без регистрации:\n"
-        "   /find <часть названия> – найти книгу\n"
+        "📚 <b>Книжный рекомендательный бот</b>\n\n"
+        "🔹 <b>Без регистрации:</b>\n"
+        "   /find &lt;часть названия&gt; – найти книгу\n"
         "   Отправь ID книги (число) – получу обычные рекомендации\n\n"
-        "🔹 С регистрацией (все оценки сохраняются):\n"
+        "🔹 <b>С регистрацией</b> (все оценки сохраняются):\n"
         "   /register – создать новый профиль\n"
-        "   /login <ID> – войти в существующий профиль\n"
+        "   /login &lt;ID&gt; – войти в существующий профиль\n"
         "   /logout – выйти из профиля\n"
         "   /my_id – показать свой ID в системе\n"
-        "   /rate <ID_книги> <оценка> – оценить книгу (1-5)\n"
+        "   /rate &lt;ID_книги&gt; &lt;оценка&gt; – оценить книгу (1-5)\n"
         "   /my_ratings – список ваших оценок\n"
-        "   /rec_personal <ID_книги> – персональные рекомендации (учитывают ваши оценки)\n\n"
-        "📌 После поиска просто отправь ID книги (число) – получу обычные рекомендации."
+        "   /rec_personal &lt;ID_книги&gt; – персональные рекомендации\n\n"
+        "📌 После поиска просто отправь ID книги (число)."
     )
-    await update.message.reply_text(text)
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=get_main_keyboard())
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         resp = requests.post(f"{API_BASE_URL}/register", timeout=10)
         if resp.status_code != 200:
-            await update.message.reply_text("❌ Ошибка регистрации на сервере.")
+            await update.message.reply_text("❌ Ошибка регистрации на сервере.", reply_markup=get_main_keyboard())
             return
         data = resp.json()
         api_user_id = data["user_id"]
@@ -100,57 +116,64 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_api_user_id(telegram_id, api_user_id)
         context.user_data["api_user_id"] = api_user_id
         await update.message.reply_text(
-            f"✅ Вы зарегистрированы! Ваш ID в системе: {api_user_id}\n"
+            f"✅ Вы зарегистрированы! Ваш ID в системе: <code>{api_user_id}</code>\n"
             "Сохраните этот ID, чтобы войти позже командой /login.\n"
-            "Теперь вы можете оценивать книги и получать персональные рекомендации."
+            "Теперь вы можете оценивать книги и получать персональные рекомендации.",
+            parse_mode='HTML', reply_markup=get_main_keyboard()
         )
     except Exception as e:
         logger.error(f"register error: {e}")
-        await update.message.reply_text("❌ Ошибка соединения с сервером.")
+        await update.message.reply_text("❌ Ошибка соединения с сервером.", reply_markup=get_main_keyboard())
 
 async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Использование: /login <ID>")
+        await update.message.reply_text("Использование: /login &lt;ID&gt;", parse_mode='HTML', reply_markup=get_main_keyboard())
         return
     try:
         api_user_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("ID должен быть числом.")
+        await update.message.reply_text("ID должен быть числом.", reply_markup=get_main_keyboard())
         return
     try:
         resp = requests.get(f"{API_BASE_URL}/user_ratings/{api_user_id}", timeout=10)
         if resp.status_code == 404:
-            await update.message.reply_text("Пользователь с таким ID не найден. Зарегистрируйтесь с помощью /register.")
+            await update.message.reply_text("Пользователь с таким ID не найден. Зарегистрируйтесь с помощью /register.",
+                                            reply_markup=get_main_keyboard())
             return
         resp.raise_for_status()
     except Exception:
-        await update.message.reply_text("Ошибка проверки. Попробуйте позже.")
+        await update.message.reply_text("Ошибка проверки. Попробуйте позже.", reply_markup=get_main_keyboard())
         return
     telegram_id = update.effective_user.id
     set_api_user_id(telegram_id, api_user_id)
     context.user_data["api_user_id"] = api_user_id
-    await update.message.reply_text(f"✅ Вход выполнен. Ваш ID: {api_user_id}")
+    await update.message.reply_text(f"✅ Вход выполнен. Ваш ID: <code>{api_user_id}</code>",
+                                    parse_mode='HTML', reply_markup=get_main_keyboard())
 
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     delete_api_user_id(telegram_id)
     context.user_data.pop("api_user_id", None)
-    await update.message.reply_text("🚪 Вы вышли из профиля. Теперь рекомендации будут без учёта ваших оценок.")
+    await update.message.reply_text("🚪 Вы вышли из профиля. Теперь рекомендации будут без учёта ваших оценок.",
+                                    reply_markup=get_main_keyboard())
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_id = await ensure_session(update, context)
     if api_id:
-        await update.message.reply_text(f"Ваш ID в системе: {api_id}")
+        await update.message.reply_text(f"Ваш ID в системе: <code>{api_id}</code>",
+                                        parse_mode='HTML', reply_markup=get_main_keyboard())
     else:
-        await update.message.reply_text("Вы не зарегистрированы и не вошли. Используйте /register или /login.")
+        await update.message.reply_text("Вы не зарегистрированы и не вошли. Используйте /register или /login.",
+                                        reply_markup=get_main_keyboard())
 
 async def rate_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_id = await ensure_session(update, context)
     if not api_id:
-        await update.message.reply_text("Сначала войдите в профиль: /register или /login.")
+        await update.message.reply_text("Сначала войдите в профиль: /register или /login.", reply_markup=get_main_keyboard())
         return
     if len(context.args) != 2:
-        await update.message.reply_text("Использование: /rate <ID_книги> <оценка (1-5)>")
+        await update.message.reply_text("Использование: /rate &lt;ID_книги&gt; &lt;оценка (1-5)&gt;",
+                                        parse_mode='HTML', reply_markup=get_main_keyboard())
         return
     try:
         book_id = int(context.args[0])
@@ -158,71 +181,81 @@ async def rate_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not (1 <= rating <= 5):
             raise ValueError
     except ValueError:
-        await update.message.reply_text("ID книги и оценка должны быть числами. Оценка от 1 до 5.")
+        await update.message.reply_text("ID книги и оценка должны быть числами. Оценка от 1 до 5.",
+                                        reply_markup=get_main_keyboard())
         return
     payload = {"user_id": api_id, "book_id": book_id, "rating": rating}
     try:
         resp = requests.post(f"{API_BASE_URL}/rate", json=payload, timeout=10)
         if resp.status_code == 200:
-            await update.message.reply_text(f"⭐ Книга с ID {book_id} оценена на {rating}")
+            await update.message.reply_text(f"⭐ Книга с ID <code>{book_id}</code> оценена на {rating}",
+                                            parse_mode='HTML', reply_markup=get_main_keyboard())
         else:
-            await update.message.reply_text(f"❌ Ошибка: {resp.text}")
+            await update.message.reply_text(f"❌ Ошибка: {resp.text}", reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"rate error: {e}")
-        await update.message.reply_text("Не удалось сохранить оценку.")
+        await update.message.reply_text("Не удалось сохранить оценку.", reply_markup=get_main_keyboard())
 
 async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_id = await ensure_session(update, context)
     if not api_id:
-        await update.message.reply_text("Сначала войдите в профиль: /register или /login.")
+        await update.message.reply_text("Сначала войдите в профиль: /register или /login.", reply_markup=get_main_keyboard())
         return
     try:
         resp = requests.get(f"{API_BASE_URL}/user_ratings/{api_id}", timeout=10)
         if resp.status_code != 200:
-            await update.message.reply_text("Не удалось получить оценки.")
+            await update.message.reply_text("Не удалось получить оценки.", reply_markup=get_main_keyboard())
             return
         ratings = resp.json()
         if not ratings:
-            await update.message.reply_text("У вас пока нет оценок. Используйте /rate <ID_книги> <оценка>")
+            await update.message.reply_text("У вас пока нет оценок. Используйте /rate &lt;ID_книги&gt; &lt;оценка&gt;",
+                                            parse_mode='HTML', reply_markup=get_main_keyboard())
             return
-        msg = "⭐ Ваши оценки:\n"
+        msg = "⭐ <b>Ваши оценки:</b>\n"
         for r in ratings[:20]:
-            msg += f"• ID {r['book_id']} — {r['title_ru']} — оценка: {r['rating']}\n"
+            safe_title = escape_html(r['title_ru'])
+            msg += f"• ID <code>{r['book_id']}</code> — {safe_title} — оценка: <b>{r['rating']}</b>\n"
         if len(ratings) > 20:
             msg += f"\n... и ещё {len(ratings)-20} оценок."
-        await update.message.reply_text(msg)
+        await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"my_ratings error: {e}")
-        await update.message.reply_text("Ошибка получения оценок.")
+        await update.message.reply_text("Ошибка получения оценок.", reply_markup=get_main_keyboard())
 
 async def recommend_personal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_id = await ensure_session(update, context)
     if not api_id:
-        await update.message.reply_text("Сначала войдите в профиль: /register или /login.")
+        await update.message.reply_text("Сначала войдите в профиль: /register или /login.", reply_markup=get_main_keyboard())
         return
     if not context.args:
-        await update.message.reply_text("Использование: /rec_personal <ID_книги>")
+        await update.message.reply_text("Использование: /rec_personal &lt;ID_книги&gt;",
+                                        parse_mode='HTML', reply_markup=get_main_keyboard())
         return
     try:
         book_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("ID книги должен быть числом.")
+        await update.message.reply_text("ID книги должен быть числом.", reply_markup=get_main_keyboard())
         return
     payload = {"user_id": api_id, "book_id": book_id, "alpha": 0.6, "top_n": 10}
     try:
         resp = requests.post(f"{API_BASE_URL}/recommend_personal", json=payload, timeout=30)
         if resp.status_code != 200:
-            await update.message.reply_text("Не удалось получить персональные рекомендации. Возможно, у вас мало оценок?")
+            await update.message.reply_text("Не удалось получить персональные рекомендации. Возможно, у вас мало оценок?",
+                                            reply_markup=get_main_keyboard())
             return
         books = resp.json()
         if not books:
-            await update.message.reply_text("Рекомендаций не найдено.")
+            await update.message.reply_text("Рекомендаций не найдено.", reply_markup=get_main_keyboard())
             return
-        answer = "📚 Ваши персональные рекомендации:\n\n" + "\n".join(f"{i+1}. {title}" for i, title in enumerate(books[:10]))
-        await update.message.reply_text(answer)
+        lines = []
+        for i, title in enumerate(books[:10], 1):
+            safe_title = escape_html(title)
+            lines.append(f"{i}. <b>{safe_title}</b>")
+        answer = "📚 <b>Ваши персональные рекомендации:</b>\n\n" + "\n".join(lines)
+        await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"rec_personal error: {e}")
-        await update.message.reply_text("Ошибка получения рекомендаций.")
+        await update.message.reply_text("Ошибка получения рекомендаций.", reply_markup=get_main_keyboard())
 
 # --- Поиск книг ---
 user_search_results = {}
@@ -230,28 +263,31 @@ user_search_results = {}
 async def find_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ensure_session(update, context)
     if not context.args:
-        await update.message.reply_text("Пожалуйста, укажи часть названия после /find. Пример: /find Властелин")
+        await update.message.reply_text("Пожалуйста, укажи часть названия после /find. Пример: /find Властелин",
+                                        reply_markup=get_main_keyboard())
         return
     query = " ".join(context.args)
-    await update.message.reply_text(f"🔎 Ищу книги по запросу «{query}»...")
+    await update.message.reply_text(f"🔎 Ищу книги по запросу «{escape_html(query)}»...",
+                                    parse_mode='HTML', reply_markup=get_main_keyboard())
     try:
         response = requests.post(f"{API_BASE_URL}/find", json={"query": query}, timeout=10)
         response.raise_for_status()
         books = response.json()
         if not books:
-            await update.message.reply_text("😕 Ничего не найдено. Попробуй другое название.")
+            await update.message.reply_text("😕 Ничего не найдено. Попробуй другое название.", reply_markup=get_main_keyboard())
             return
         telegram_id = update.effective_user.id
         user_search_results[telegram_id] = books
-        msg = "📖 Найденные книги:\n\n"
+        msg = "📖 <b>Найденные книги:</b>\n\n"
         for book in books:
-            msg += f"ID: {book['id']} — {book['title_ru']}\n"
+            safe_title = escape_html(book['title_ru'])
+            msg += f"ID: <code>{book['id']}</code> — {safe_title}\n"
         msg += "\n✏️ Чтобы получить обычные рекомендации, отправь ID книги (просто число).\n"
-        msg += "Для персональных используй /rec_personal <ID>"
-        await update.message.reply_text(msg)
+        msg += "Для персональных используй /rec_personal &lt;ID&gt;"
+        await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"find_books error: {e}")
-        await update.message.reply_text("❌ Ошибка соединения с сервером.")
+        await update.message.reply_text("❌ Ошибка соединения с сервером.", reply_markup=get_main_keyboard())
 
 # --- Обработчик обычных текстовых сообщений (ID книги) ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -259,26 +295,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if text.isdigit():
         book_id = int(text)
-        await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID {book_id}...")
+        await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID <code>{book_id}</code>...",
+                                        parse_mode='HTML', reply_markup=get_main_keyboard())
         try:
             response = requests.post(f"{API_BASE_URL}/recommend", json={"book_id": book_id}, timeout=30)
             response.raise_for_status()
             data = response.json()
             recommendations = data.get("recommendations", [])
             if not recommendations:
-                await update.message.reply_text("😕 Для этой книги не нашлось рекомендаций.")
+                await update.message.reply_text("😕 Для этой книги не нашлось рекомендаций.", reply_markup=get_main_keyboard())
                 return
-            answer = "📚 Обычные рекомендации (без учёта вашего профиля):\n\n"
+            answer = "📚 <b>Обычные рекомендации (без учёта вашего профиля):</b>\n\n"
             for i, book in enumerate(recommendations[:10], 1):
-                answer += f"{i}. {book}\n"
-            await update.message.reply_text(answer)
+                safe_title = escape_html(book)
+                answer += f"{i}. {safe_title}\n"
+            await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
         except Exception as e:
             logger.error(f"handle_text recommend error: {e}")
-            await update.message.reply_text("❌ Ошибка получения рекомендаций.")
+            await update.message.reply_text("❌ Ошибка получения рекомендаций.", reply_markup=get_main_keyboard())
     else:
         await update.message.reply_text(
             "Пожалуйста, отправь ID книги (число) из списка после /find.\n"
-            "Используй /find <название> для поиска, /rec_personal для персональных рекомендаций."
+            "Используй /find &lt;название&gt; для поиска, /rec_personal для персональных рекомендаций.",
+            parse_mode='HTML', reply_markup=get_main_keyboard()
         )
 
 # --- Создание и настройка веб-хука и сервера ---
