@@ -55,7 +55,6 @@ def delete_api_user_id(telegram_id):
     conn.commit()
     conn.close()
 
-# Инициализируем БД при старте
 init_sessions_db()
 
 # --- Вспомогательная функция для загрузки api_user_id в context.user_data ---
@@ -73,11 +72,11 @@ async def ensure_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ensure_session(update, context)
     text = (
-        "📚 *Книжный рекомендательный бот*\n\n"
-        "🔹 *Без регистрации*:\n"
+        "📚 Книжный рекомендательный бот\n\n"
+        "🔹 Без регистрации:\n"
         "   /find <часть названия> – найти книгу\n"
         "   Отправь ID книги (число) – получу обычные рекомендации\n\n"
-        "🔹 *С регистрацией* (все оценки сохраняются):\n"
+        "🔹 С регистрацией (все оценки сохраняются):\n"
         "   /register – создать новый профиль\n"
         "   /login <ID> – войти в существующий профиль\n"
         "   /logout – выйти из профиля\n"
@@ -87,7 +86,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   /rec_personal <ID_книги> – персональные рекомендации (учитывают ваши оценки)\n\n"
         "📌 После поиска просто отправь ID книги (число) – получу обычные рекомендации."
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text)
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -101,10 +100,9 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_api_user_id(telegram_id, api_user_id)
         context.user_data["api_user_id"] = api_user_id
         await update.message.reply_text(
-            f"✅ Вы зарегистрированы! Ваш ID в системе: `{api_user_id}`\n"
+            f"✅ Вы зарегистрированы! Ваш ID в системе: {api_user_id}\n"
             "Сохраните этот ID, чтобы войти позже командой /login.\n"
-            "Теперь вы можете оценивать книги и получать персональные рекомендации.",
-            parse_mode="Markdown"
+            "Теперь вы можете оценивать книги и получать персональные рекомендации."
         )
     except Exception as e:
         logger.error(f"register error: {e}")
@@ -119,7 +117,6 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("ID должен быть числом.")
         return
-    # Проверяем существование пользователя через API (например, запрос его оценок)
     try:
         resp = requests.get(f"{API_BASE_URL}/user_ratings/{api_user_id}", timeout=10)
         if resp.status_code == 404:
@@ -132,7 +129,7 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     set_api_user_id(telegram_id, api_user_id)
     context.user_data["api_user_id"] = api_user_id
-    await update.message.reply_text(f"✅ Вход выполнен. Ваш ID: `{api_user_id}`", parse_mode="Markdown")
+    await update.message.reply_text(f"✅ Вход выполнен. Ваш ID: {api_user_id}")
 
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
@@ -143,7 +140,7 @@ async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_id = await ensure_session(update, context)
     if api_id:
-        await update.message.reply_text(f"Ваш ID в системе: `{api_id}`", parse_mode="Markdown")
+        await update.message.reply_text(f"Ваш ID в системе: {api_id}")
     else:
         await update.message.reply_text("Вы не зарегистрированы и не вошли. Используйте /register или /login.")
 
@@ -188,12 +185,12 @@ async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not ratings:
             await update.message.reply_text("У вас пока нет оценок. Используйте /rate <ID_книги> <оценка>")
             return
-        msg = "⭐ *Ваши оценки:*\n"
+        msg = "⭐ Ваши оценки:\n"
         for r in ratings[:20]:
-            msg += f"• ID `{r['book_id']}` — {r['title_ru']} — оценка: {r['rating']}\n"
+            msg += f"• ID {r['book_id']} — {r['title_ru']} — оценка: {r['rating']}\n"
         if len(ratings) > 20:
             msg += f"\n... и ещё {len(ratings)-20} оценок."
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await update.message.reply_text(msg)
     except Exception as e:
         logger.error(f"my_ratings error: {e}")
         await update.message.reply_text("Ошибка получения оценок.")
@@ -221,17 +218,17 @@ async def recommend_personal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if not books:
             await update.message.reply_text("Рекомендаций не найдено.")
             return
-        answer = "📚 *Ваши персональные рекомендации:*\n\n" + "\n".join(f"{i+1}. {title}" for i, title in enumerate(books[:10]))
-        await update.message.reply_text(answer, parse_mode="Markdown")
+        answer = "📚 Ваши персональные рекомендации:\n\n" + "\n".join(f"{i+1}. {title}" for i, title in enumerate(books[:10]))
+        await update.message.reply_text(answer)
     except Exception as e:
         logger.error(f"rec_personal error: {e}")
         await update.message.reply_text("Ошибка получения рекомендаций.")
 
-# --- Поиск книг (без изменений, но добавим ensure_session для единообразия) ---
-user_search_results = {}  # временное хранилище результатов поиска для сессии
+# --- Поиск книг ---
+user_search_results = {}
 
 async def find_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await ensure_session(update, context)  # необязательно, но пусть будет
+    await ensure_session(update, context)
     if not context.args:
         await update.message.reply_text("Пожалуйста, укажи часть названия после /find. Пример: /find Властелин")
         return
@@ -248,17 +245,16 @@ async def find_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_search_results[telegram_id] = books
         msg = "📖 Найденные книги:\n\n"
         for book in books:
-            msg += f"ID: `{book['id']}` — {book['title_ru']}\n"
+            msg += f"ID: {book['id']} — {book['title_ru']}\n"
         msg += "\n✏️ Чтобы получить обычные рекомендации, отправь ID книги (просто число).\n"
         msg += "Для персональных используй /rec_personal <ID>"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await update.message.reply_text(msg)
     except Exception as e:
         logger.error(f"find_books error: {e}")
         await update.message.reply_text("❌ Ошибка соединения с сервером.")
 
-# --- Обработчик обычных текстовых сообщений (оставлен без учёта профиля) ---
+# --- Обработчик обычных текстовых сообщений (ID книги) ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Здесь не используем профиль – обычные рекомендации
     user_id = update.effective_user.id
     text = update.message.text.strip()
     if text.isdigit():
@@ -272,10 +268,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not recommendations:
                 await update.message.reply_text("😕 Для этой книги не нашлось рекомендаций.")
                 return
-            answer = "📚 **Обычные рекомендации (без учёта вашего профиля):**\n\n"
+            answer = "📚 Обычные рекомендации (без учёта вашего профиля):\n\n"
             for i, book in enumerate(recommendations[:10], 1):
                 answer += f"{i}. {book}\n"
-            await update.message.reply_text(answer, parse_mode="Markdown")
+            await update.message.reply_text(answer)
         except Exception as e:
             logger.error(f"handle_text recommend error: {e}")
             await update.message.reply_text("❌ Ошибка получения рекомендаций.")
@@ -300,10 +296,8 @@ async def main():
     application.add_handler(CommandHandler("find", find_books))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # Устанавливаем веб-хук
     await application.bot.set_webhook(f"{URL}/telegram", allowed_updates=Update.ALL_TYPES)
 
-    # Веб-сервер для приёма запросов от Telegram
     async def telegram(request: Request) -> Response:
         await application.update_queue.put(Update.de_json(await request.json(), application.bot))
         return Response()
