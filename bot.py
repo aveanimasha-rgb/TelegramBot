@@ -383,6 +383,7 @@ async def handle_filter_callback(update: Update, context: ContextTypes.DEFAULT_T
 # --- Обработчик обычных текстовых сообщений (ID книги и состояния ожидания) ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
+    logger.info(f"Получен текст: '{text}' (repr: {repr(text)})")  # ← отладка
     
     # Отладка: выводим точное представление текста
     logger.info(f"Received text: '{text}' (repr: {repr(text)})")
