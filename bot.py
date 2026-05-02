@@ -8,8 +8,8 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 
 # --- Настройка логирования ---
 logging.basicConfig(level=logging.INFO)
@@ -153,7 +153,7 @@ async def do_rate(update: Update, context: ContextTypes.DEFAULT_TYPE, api_id: in
         context.user_data.pop("awaiting_rate_step", None)
         context.user_data.pop("awaiting_rate_book_id", None)
 
-# --- Обработчики команд ---
+# ------------------- Обработчики команд -------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ensure_session(update, context)
     text = (
@@ -268,7 +268,6 @@ async def find_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = " ".join(context.args)
         await do_find(update, context, query)
         return
-    # Нет аргументов – переходим в режим ожидания
     context.user_data["awaiting_find"] = True
     await update.message.reply_text(
         "🔎 Введите название книги (или его часть):",
@@ -290,7 +289,6 @@ async def recommend_personal(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
         await do_recommend_personal(update, context, api_id, book_id)
         return
-    # Нет аргументов – даём инструкцию
     await update.message.reply_text(
         "📚 <b>Как получить персональные рекомендации</b>\n\n"
         "1️⃣ Найдите интересующую вас книгу командой:\n"
@@ -323,13 +321,24 @@ async def rate_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await do_rate(update, context, api_id, book_id, rating)
         return
-    # Нет аргументов или один – пошаговый ввод
     context.user_data["awaiting_rate_step"] = 1
     await update.message.reply_text(
         "✏️ Введите ID книги, которую хотите оценить:",
         parse_mode='HTML',
         reply_markup=get_main_keyboard()
     )
+
+async def handle_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "filter_yes":
+        context.user_data["awaiting_genre_filter"] = True
+        await query.edit_message_text(
+            "🔍 Введите часть названия жанра (например, 'фантастика' или 'детектив'):",
+            reply_markup=None
+        )
+    else:
+        await query.edit_message_text("❌ Фильтрация отменена.", reply_markup=None)
 
 # --- Обработчик обычных текстовых сообщений (ID книги и состояния ожидания) ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -377,7 +386,39 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Оценка должна быть числом.", reply_markup=get_main_keyboard())
         return
 
-    # 4. Если нет активного состояния – пытаемся обработать как ID книги для обычных рекомендаций
+    # 4. Фильтрация рекомендаций по жанру (ввод после нажатия "Да")
+    if context.user_data.get("awaiting_genre_filter"):
+        genre_query = text
+        last_en = context.user_data.get("last_recommendations_en", [])
+        if not last_en:
+            await update.message.reply_text("Нет сохранённых рекомендаций для фильтрации.", reply_markup=get_main_keyboard())
+            context.user_data.pop("awaiting_genre_filter", None)
+            return
+
+        await update.message.reply_text(f"Фильтрую по жанру: «{escape_html(genre_query)}»...", parse_mode='HTML')
+        try:
+            resp = requests.post(
+                f"{API_BASE_URL}/filter_recommendations",
+                json={"titles": last_en, "genre_query": genre_query},
+                timeout=30
+            )
+            resp.raise_for_status()
+            filtered = resp.json()
+            if not filtered:
+                await update.message.reply_text("Книг с таким жанром в рекомендациях не найдено.", reply_markup=get_main_keyboard())
+            else:
+                msg = "📚 <b>Отфильтрованные рекомендации:</b>\n\n"
+                for i, title in enumerate(filtered[:10], 1):
+                    msg += f"{i}. <b>{escape_html(title)}</b>\n"
+                await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
+        except Exception as e:
+            logger.error(f"filter error: {e}")
+            await update.message.reply_text("❌ Ошибка фильтрации.", reply_markup=get_main_keyboard())
+        finally:
+            context.user_data.pop("awaiting_genre_filter", None)
+        return
+
+    # 5. Если нет активного состояния – пытаемся обработать как ID книги для обычных рекомендаций
     if text.isdigit():
         book_id = int(text)
         await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID <code>{book_id}</code>...",
@@ -387,14 +428,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response.raise_for_status()
             data = response.json()
             recommendations = data.get("recommendations", [])
+            recommendations_en = data.get("recommendations_en", [])
+            if recommendations_en:
+                context.user_data['last_recommendations_en'] = recommendations_en
+
             if not recommendations:
                 await update.message.reply_text("😕 Для этой книги не нашлось рекомендаций.", reply_markup=get_main_keyboard())
                 return
+
             answer = "📚 <b>Обычные рекомендации (без учёта вашего профиля):</b>\n\n"
             for i, book in enumerate(recommendations[:10], 1):
                 safe_title = escape_html(book)
                 answer += f"{i}. {safe_title}\n"
             await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
+
+            # Предложить фильтрацию, если есть английские названия
+            if recommendations_en:
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Да", callback_data="filter_yes"),
+                     InlineKeyboardButton("Нет", callback_data="filter_no")]
+                ])
+                await update.message.reply_text("Хотите отфильтровать эти рекомендации по жанру?", reply_markup=keyboard)
         except Exception as e:
             logger.error(f"handle_text recommend error: {e}")
             await update.message.reply_text("❌ Ошибка получения рекомендаций.", reply_markup=get_main_keyboard())
@@ -419,6 +473,7 @@ async def main():
     application.add_handler(CommandHandler("rec_personal", recommend_personal))
     application.add_handler(CommandHandler("find", find_books))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.add_handler(CallbackQueryHandler(handle_filter_callback, pattern="^filter_"))
 
     await application.bot.set_webhook(f"{URL}/telegram", allowed_updates=Update.ALL_TYPES)
 
