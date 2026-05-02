@@ -69,7 +69,7 @@ def get_main_keyboard():
         [KeyboardButton("🏠 Главное меню")],
         [KeyboardButton("🔍 Поиск книги"), KeyboardButton("🎯 Персональные рекомендации")],
         [KeyboardButton("📝 Регистрация"), KeyboardButton("🔑 Вход"), KeyboardButton("🆔 Мой ID")],
-        [KeyboardButton("Оценить книгу"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")]
+        [KeyboardButton("О"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")]
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
@@ -408,7 +408,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🆔 Мой ID":
         await my_id(update, context)
         return
-    if text == "Оценить книгу":
+    if text == "О":
         await rate(update, context)
         return
     if text == "📚 Мои оценки":
