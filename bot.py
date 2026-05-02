@@ -69,7 +69,7 @@ def get_main_keyboard():
         [KeyboardButton("🏠 Главное меню")],
         [KeyboardButton("🔍 Поиск книги"), KeyboardButton("🎯 Персональные рекомендации")],
         [KeyboardButton("📝 Регистрация"), KeyboardButton("🔑 Вход"), KeyboardButton("🆔 Мой ID")],
-        [KeyboardButton("Оценить книгу"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")]
+        [KeyboardButton("/rate"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")]
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
