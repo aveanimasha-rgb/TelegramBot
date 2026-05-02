@@ -69,7 +69,7 @@ def get_main_keyboard():
         [KeyboardButton("/start")],
         [KeyboardButton("/find"), KeyboardButton("/rec_personal")],
         [KeyboardButton("/register"), KeyboardButton("/login"), KeyboardButton("/my_id")],
-        [KeyboardButton("/rate"), KeyboardButton("/my_ratings"), KeyboardButton("/logout")]
+        [KeyboardButton("/rate"), KeyboardButton("/"), KeyboardButton("/logout")]
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
@@ -167,7 +167,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   /logout – выйти из профиля\n"
         "   /my_id – показать свой ID в системе\n"
         "   /rate &lt;ID_книги&gt; &lt;оценка&gt; – оценить книгу (1-5)\n"
-        "   /my_ratings – список ваших оценок\n"
+        "   / – список ваших оценок\n"
         "   /rec_personal &lt;ID_книги&gt; – персональные рекомендации\n\n"
         "📌 После поиска просто отправь ID книги (число)."
     )
@@ -261,6 +261,46 @@ async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"my_ratings error: {e}")
         await update.message.reply_text("Ошибка получения оценок.", reply_markup=get_main_keyboard())
+        if ratings:
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Удалить оценку", callback_data="delete_rating")]])
+        await update.message.reply_text(
+            "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.",
+            reply_markup=keyboard
+        )
+        
+async def delete_rating_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "delete_rating":
+        context.user_data["awaiting_delete_rating"] = True
+        await query.edit_message_text("Введите ID книги, оценку которой хотите удалить (из списка выше):")
+
+async def show_ratings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    api_id = context.user_data.get("api_user_id")
+    if not api_id:
+        await query.edit_message_text("Вы не авторизованы.")
+        return
+    try:
+        resp = requests.get(f"{API_BASE_URL}/user_ratings/{api_id}", timeout=10)
+        if resp.status_code != 200:
+            await query.edit_message_text("Не удалось получить оценки.")
+            return
+        ratings = resp.json()
+        if not ratings:
+            await query.edit_message_text("У вас пока нет оценок.")
+            return
+        msg = "⭐ <b>Ваши оценки:</b>\n"
+        for r in ratings[:20]:
+            safe_title = escape_html(r['title_ru'])
+            msg += f"• ID <code>{r['book_id']}</code> — {safe_title} — оценка: <b>{r['rating']}</b>\n"
+        if len(ratings) > 20:
+            msg += f"\n... и ещё {len(ratings)-20} оценок."
+        await query.edit_message_text(msg, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"show_ratings error: {e}")
+        await query.edit_message_text("Ошибка получения оценок.")
 
 async def find_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ensure_session(update, context)
@@ -418,6 +458,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("awaiting_genre_filter", None)
         return
 
+        # 4. Ожидание ID для удаления оценки
+    if context.user_data.get("awaiting_delete_rating"):
+        if text.isdigit():
+            book_id = int(text)
+            api_id = context.user_data.get("api_user_id")
+            if not api_id:
+                await update.message.reply_text("Вы не вошли в профиль. Используйте /register или /login.", reply_markup=get_main_keyboard())
+            else:
+                await update.message.reply_text(f"Удаляю оценку для книги ID {book_id}...", reply_markup=get_main_keyboard())
+                try:
+                    resp = requests.post(f"{API_BASE_URL}/delete_rating", json={"user_id": api_id, "book_id": book_id}, timeout=10)
+                    if resp.status_code == 200:
+                        await update.message.reply_text(f"✅ Оценка для книги ID {book_id} удалена.", reply_markup=get_main_keyboard())
+                        # Предложить показать обновлённые оценки
+                        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Показать обновлённые оценки", callback_data="show_ratings")]])
+                        await update.message.reply_text("Хотите увидеть обновлённый список?", reply_markup=keyboard)
+                    else:
+                        error = resp.json().get("detail", "Неизвестная ошибка")
+                        await update.message.reply_text(f"❌ Ошибка при удалении: {error}", reply_markup=get_main_keyboard())
+                except Exception as e:
+                    logger.error(f"delete_rating error: {e}")
+                    await update.message.reply_text("Не удалось соединиться с сервером.", reply_markup=get_main_keyboard())
+        else:
+            await update.message.reply_text("Пожалуйста, введите число – ID книги.", reply_markup=get_main_keyboard())
+        context.user_data.pop("awaiting_delete_rating", None)
+        return
     # 5. Если нет активного состояния – пытаемся обработать как ID книги для обычных рекомендаций
     if text.isdigit():
         book_id = int(text)
@@ -474,6 +540,8 @@ async def main():
     application.add_handler(CommandHandler("find", find_books))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(CallbackQueryHandler(handle_filter_callback, pattern="^filter_"))
+    application.add_handler(CallbackQueryHandler(delete_rating_callback, pattern="^delete_rating$"))
+    application.add_handler(CallbackQueryHandler(show_ratings_callback, pattern="^show_ratings$"))
 
     await application.bot.set_webhook(f"{URL}/telegram", allowed_updates=Update.ALL_TYPES)
 
