@@ -151,7 +151,7 @@ async def do_rate(update: Update, context: ContextTypes.DEFAULT_TYPE, api_id: in
         await update.message.reply_text("Не удалось сохранить оценку.", reply_markup=get_main_keyboard())
     finally:
         context.user_data.pop("awaiting_rate_step", None)
-        context.user_data.pop("awaiting_rate_book_id", None)
+        context.user_data.pop("awaiting_rate_id", None)
 
 # ------------------- Обработчики команд -------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -343,7 +343,7 @@ async def recommend_personal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=get_main_keyboard()
     )
 
-async def rate_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_id = await ensure_session(update, context)
     if not api_id:
         await update.message.reply_text("Сначала войдите в профиль: /register или /login.",
@@ -405,7 +405,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await my_id(update, context)
         return
     if text == "⭐ Оценить книгу":
-        await rate_book(update, context)
+        await rate(update, context)
         return
     if text == "📚 Мои оценки":
         await my_ratings(update, context)
@@ -434,7 +434,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 3. Ожидание оценки (двухшаговый процесс)
     if context.user_data.get("awaiting_rate_step") == 1:
         if text.isdigit():
-            context.user_data["awaiting_rate_book_id"] = int(text)
+            context.user_data["awaiting_rate_id"] = int(text)
             context.user_data["awaiting_rate_step"] = 2
             await update.message.reply_text("Введите оценку (от 1 до 5):", reply_markup=get_main_keyboard())
         else:
@@ -445,7 +445,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             rating = int(text)
             if 1 <= rating <= 5:
                 api_id = context.user_data.get("api_user_id")
-                book_id = context.user_data.get("awaiting_rate_book_id")
+                book_id = context.user_data.get("awaiting_rate_id")
                 if api_id and book_id:
                     await do_rate(update, context, api_id, book_id, rating)
                 else:
@@ -564,7 +564,7 @@ async def main():
     application.add_handler(CommandHandler("login", login))
     application.add_handler(CommandHandler("logout", logout))
     application.add_handler(CommandHandler("my_id", my_id))
-    application.add_handler(CommandHandler("rate", rate_book))
+    application.add_handler(CommandHandler("rate", rate))
     application.add_handler(CommandHandler("my_ratings", my_ratings))
     application.add_handler(CommandHandler("rec_personal", recommend_personal))
     application.add_handler(CommandHandler("find", find_books))
