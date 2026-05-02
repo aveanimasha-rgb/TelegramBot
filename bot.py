@@ -66,10 +66,10 @@ def escape_html(text: str) -> str:
 # --- Клавиатура с кнопками быстрых команд ---
 def get_main_keyboard():
     buttons = [
-        [KeyboardButton("/start")],
-        [KeyboardButton("/find"), KeyboardButton("/rec_personal")],
-        [KeyboardButton("/register"), KeyboardButton("/login"), KeyboardButton("/my_id")],
-        [KeyboardButton("/rate"), KeyboardButton("/"), KeyboardButton("/logout")]
+        [KeyboardButton("🏠 Главное меню")],
+        [KeyboardButton("🔍 Поиск книги"), KeyboardButton("🎯 Персональные рекомендации")],
+        [KeyboardButton("📝 Регистрация"), KeyboardButton("🔑 Вход"), KeyboardButton("🆔 Мой ID")],
+        [KeyboardButton("⭐ Оценить книгу"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")]
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
@@ -167,7 +167,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   /logout – выйти из профиля\n"
         "   /my_id – показать свой ID в системе\n"
         "   /rate &lt;ID_книги&gt; &lt;оценка&gt; – оценить книгу (1-5)\n"
-        "   / – список ваших оценок\n"
+        "   /my_ratings – список ваших оценок\n"
         "   /rec_personal &lt;ID_книги&gt; – персональные рекомендации\n\n"
         "📌 После поиска просто отправь ID книги (число)."
     )
@@ -384,6 +384,36 @@ async def handle_filter_callback(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
+        # Обработка русских кнопок главного меню
+    if text == "🏠 Главное меню":
+        await start(update, context)
+        return
+    if text == "🔍 Поиск книги":
+        await find_books(update, context)
+        return
+    if text == "🎯 Персональные рекомендации":
+        await recommend_personal(update, context)
+        return
+    if text == "📝 Регистрация":
+        await register(update, context)
+        return
+    if text == "🔑 Вход":
+        # Вызов /login без аргументов – просим ввести ID
+        await update.message.reply_text("Использование: /login <ID>", reply_markup=get_main_keyboard())
+        return
+    if text == "🆔 Мой ID":
+        await my_id(update, context)
+        return
+    if text == "⭐ Оценить книгу":
+        await rate_book(update, context)
+        return
+    if text == "📚 Мои оценки":
+        await my_ratings(update, context)
+        return
+    if text == "🚪 Выход":
+        await logout(update, context)
+        return
+    
     # 1. Ожидание поискового запроса
     if context.user_data.get("awaiting_find"):
         await do_find(update, context, text)
