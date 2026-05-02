@@ -261,7 +261,7 @@ async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"my_ratings error: {e}")
         await update.message.reply_text("Ошибка получения оценок.", reply_markup=get_main_keyboard())
-        if ratings:
+    if ratings:
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Удалить оценку", callback_data="delete_rating")]])
         await update.message.reply_text(
             "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.",
