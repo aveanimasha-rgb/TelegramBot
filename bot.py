@@ -69,7 +69,7 @@ def get_main_keyboard():
         [KeyboardButton("🏠 Главное меню")],
         [KeyboardButton("🔍 Поиск книги"), KeyboardButton("🎯 Персональные рекомендации")],
         [KeyboardButton("📝 Регистрация"), KeyboardButton("🔑 Вход"), KeyboardButton("🆔 Мой ID")],
-        [KeyboardButton("⭐ Оценить книгу"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")]
+        [KeyboardButton("Оценить книгу"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")]
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
@@ -142,7 +142,7 @@ async def do_rate(update: Update, context: ContextTypes.DEFAULT_TYPE, api_id: in
     try:
         resp = requests.post(f"{API_BASE_URL}/rate", json=payload, timeout=10)
         if resp.status_code == 200:
-            await update.message.reply_text(f"⭐ Книга с ID <code>{book_id}</code> оценена на {rating}",
+            await update.message.reply_text(f"Книга с ID <code>{book_id}</code> оценена на {rating}",
                                             parse_mode='HTML', reply_markup=get_main_keyboard())
         else:
             await update.message.reply_text(f"❌ Ошибка: {resp.text}", reply_markup=get_main_keyboard())
@@ -251,7 +251,7 @@ async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("У вас пока нет оценок. Используйте /rate &lt;ID_книги&gt; &lt;оценка&gt;",
                                             parse_mode='HTML', reply_markup=get_main_keyboard())
             return
-        msg = "⭐ <b>Ваши оценки:</b>\n"
+        msg = "<b>Ваши оценки:</b>\n"
         for r in ratings[:20]:
             safe_title = escape_html(r['title_ru'])
             msg += f"• ID <code>{r['book_id']}</code> — {safe_title} — оценка: <b>{r['rating']}</b>\n"
@@ -291,7 +291,7 @@ async def show_ratings_callback(update: Update, context: ContextTypes.DEFAULT_TY
         if not ratings:
             await query.edit_message_text("У вас пока нет оценок.")
             return
-        msg = "⭐ <b>Ваши оценки:</b>\n"
+        msg = "<b>Ваши оценки:</b>\n"
         for r in ratings[:20]:
             safe_title = escape_html(r['title_ru'])
             msg += f"• ID <code>{r['book_id']}</code> — {safe_title} — оценка: <b>{r['rating']}</b>\n"
@@ -404,7 +404,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🆔 Мой ID":
         await my_id(update, context)
         return
-    if text == "⭐ Оценить книгу":
+    if text == "Оценить книгу":
         await rate(update, context)
         return
     if text == "📚 Мои оценки":
