@@ -3,6 +3,7 @@ import asyncio
 import logging
 import sqlite3
 import requests
+import time
 import re
 from starlette.applications import Starlette
 from starlette.routing import Route
@@ -20,6 +21,37 @@ TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 URL = os.environ.get("RENDER_EXTERNAL_URL")
 PORT = 8000
 API_BASE_URL = "https://revolshtilil-book-recommendation-bot.hf.space"
+
+# --- Функции для повторных запросов (обход "холодного старта") ---
+def post_with_retry(url, json=None, max_retries=2, timeout=45):
+    """
+    Выполняет POST-запрос с автоматическим повтором при ошибке соединения или тайм-ауте.
+    """
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(url, json=json, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            logger.warning(f"Запрос к {url} не удался (попытка {attempt+1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(3)
+
+def get_with_retry(url, max_retries=2, timeout=45):
+    """
+    Выполняет GET-запрос с автоматическим повтором при ошибке соединения или тайм-ауте.
+    """
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            logger.warning(f"Запрос к {url} не удался (попытка {attempt+1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(3)
 
 # --- База данных для хранения привязок telegram_id -> api_user_id ---
 DB_SESSIONS = "sessions.db"
@@ -91,8 +123,7 @@ async def do_find(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str
     await update.message.reply_text(f"🔎 Ищу книги по запросу «{escape_html(query)}»...",
                                     parse_mode='HTML', reply_markup=get_main_keyboard())
     try:
-        response = requests.post(f"{API_BASE_URL}/find", json={"query": query}, timeout=10)
-        response.raise_for_status()
+        response = post_with_retry(f"{API_BASE_URL}/find", json={"query": query}, timeout=45)
         books = response.json()
         if not books:
             await update.message.reply_text("😕 Ничего не найдено. Попробуй другое название.",
@@ -116,11 +147,7 @@ async def do_find(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str
 async def do_recommend_personal(update: Update, context: ContextTypes.DEFAULT_TYPE, api_id: int, book_id: int):
     payload = {"user_id": api_id, "book_id": book_id, "alpha": 0.6, "top_n": 10}
     try:
-        resp = requests.post(f"{API_BASE_URL}/recommend_personal", json=payload, timeout=30)
-        if resp.status_code != 200:
-            await update.message.reply_text("Не удалось получить персональные рекомендации. Возможно, у вас мало оценок?",
-                                            reply_markup=get_main_keyboard())
-            return
+        resp = post_with_retry(f"{API_BASE_URL}/recommend_personal", json=payload, timeout=45)
         books = resp.json()
         if not books:
             await update.message.reply_text("Рекомендаций не найдено.", reply_markup=get_main_keyboard())
@@ -133,19 +160,17 @@ async def do_recommend_personal(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"rec_personal error: {e}")
-        await update.message.reply_text("Ошибка получения рекомендаций.", reply_markup=get_main_keyboard())
+        await update.message.reply_text("Не удалось получить персональные рекомендации. Возможно, у вас мало оценок?",
+                                        reply_markup=get_main_keyboard())
     finally:
         context.user_data.pop("awaiting_rec_personal", None)
 
 async def do_rate(update: Update, context: ContextTypes.DEFAULT_TYPE, api_id: int, book_id: int, rating: int):
     payload = {"user_id": api_id, "book_id": book_id, "rating": rating}
     try:
-        resp = requests.post(f"{API_BASE_URL}/rate", json=payload, timeout=10)
-        if resp.status_code == 200:
-            await update.message.reply_text(f"Книга с ID <code>{book_id}</code> оценена на {rating}",
-                                            parse_mode='HTML', reply_markup=get_main_keyboard())
-        else:
-            await update.message.reply_text(f"❌ Ошибка: {resp.text}", reply_markup=get_main_keyboard())
+        resp = post_with_retry(f"{API_BASE_URL}/rate", json=payload, timeout=45)
+        await update.message.reply_text(f"⭐ Книга с ID <code>{book_id}</code> оценена на {rating}",
+                                        parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"rate error: {e}")
         await update.message.reply_text("Не удалось сохранить оценку.", reply_markup=get_main_keyboard())
@@ -175,10 +200,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        resp = requests.post(f"{API_BASE_URL}/register", timeout=10)
-        if resp.status_code != 200:
-            await update.message.reply_text("❌ Ошибка регистрации на сервере.", reply_markup=get_main_keyboard())
-            return
+        resp = post_with_retry(f"{API_BASE_URL}/register", timeout=45)
         data = resp.json()
         api_user_id = data["user_id"]
         telegram_id = update.effective_user.id
@@ -192,11 +214,11 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         logger.error(f"register error: {e}")
-        await update.message.reply_text("❌ Ошибка соединения с сервером.", reply_markup=get_main_keyboard())
+        await update.message.reply_text("❌ Ошибка регистрации на сервере.", reply_markup=get_main_keyboard())
 
 async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Использование: /login &lt;ID&gt;", parse_mode='HTML', reply_markup=get_main_keyboard())
+        await update.message.reply_text("Использование: /login <ID>", parse_mode='HTML', reply_markup=get_main_keyboard())
         return
     try:
         api_user_id = int(context.args[0])
@@ -204,14 +226,13 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ID должен быть числом.", reply_markup=get_main_keyboard())
         return
     try:
-        resp = requests.get(f"{API_BASE_URL}/user_ratings/{api_user_id}", timeout=10)
-        if resp.status_code == 404:
-            await update.message.reply_text("Пользователь с таким ID не найден. Зарегистрируйтесь с помощью /register.",
-                                            reply_markup=get_main_keyboard())
-            return
-        resp.raise_for_status()
+        resp = get_with_retry(f"{API_BASE_URL}/user_ratings/{api_user_id}", timeout=45)
     except Exception:
         await update.message.reply_text("Ошибка проверки. Попробуйте позже.", reply_markup=get_main_keyboard())
+        return
+    if resp.status_code == 404:
+        await update.message.reply_text("Пользователь с таким ID не найден. Зарегистрируйтесь с помощью /register.",
+                                        reply_markup=get_main_keyboard())
         return
     telegram_id = update.effective_user.id
     set_api_user_id(telegram_id, api_user_id)
@@ -242,13 +263,13 @@ async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                         reply_markup=get_main_keyboard())
         return
     try:
-        resp = requests.get(f"{API_BASE_URL}/user_ratings/{api_id}", timeout=10)
+        resp = get_with_retry(f"{API_BASE_URL}/user_ratings/{api_id}", timeout=45)
         if resp.status_code != 200:
             await update.message.reply_text("Не удалось получить оценки.", reply_markup=get_main_keyboard())
             return
         ratings = resp.json()
         if not ratings:
-            await update.message.reply_text("У вас пока нет оценок. Используйте /rate &lt;ID_книги&gt; &lt;оценка&gt;",
+            await update.message.reply_text("У вас пока нет оценок. Используйте /rate <ID_книги> <оценка>",
                                             parse_mode='HTML', reply_markup=get_main_keyboard())
             return
         msg = "<b>Ваши оценки:</b>\n"
@@ -258,16 +279,16 @@ async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(ratings) > 20:
             msg += f"\n... и ещё {len(ratings)-20} оценок."
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
+        if ratings:
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Удалить оценку", callback_data="delete_rating")]])
+            await update.message.reply_text(
+                "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.",
+                reply_markup=keyboard
+            )
     except Exception as e:
         logger.error(f"my_ratings error: {e}")
         await update.message.reply_text("Ошибка получения оценок.", reply_markup=get_main_keyboard())
-    if ratings:
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Удалить оценку", callback_data="delete_rating")]])
-        await update.message.reply_text(
-            "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.",
-            reply_markup=keyboard
-        )
-        
+
 async def delete_rating_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -283,7 +304,7 @@ async def show_ratings_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("Вы не авторизованы.")
         return
     try:
-        resp = requests.get(f"{API_BASE_URL}/user_ratings/{api_id}", timeout=10)
+        resp = get_with_retry(f"{API_BASE_URL}/user_ratings/{api_id}", timeout=45)
         if resp.status_code != 200:
             await query.edit_message_text("Не удалось получить оценки.")
             return
@@ -383,12 +404,9 @@ async def handle_filter_callback(update: Update, context: ContextTypes.DEFAULT_T
 # --- Обработчик обычных текстовых сообщений (ID книги и состояния ожидания) ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    logger.info(f"Получен текст: '{text}' (repr: {repr(text)})")  # ← отладка
-    
-    # Отладка: выводим точное представление текста
     logger.info(f"Received text: '{text}' (repr: {repr(text)})")
 
-        # Обработка русских кнопок главного меню
+    # Обработка русских кнопок главного меню
     if text == "🏠 Главное меню":
         await start(update, context)
         return
@@ -402,14 +420,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await register(update, context)
         return
     if text == "🔑 Вход":
-        # Вызов /login без аргументов – просим ввести ID
         await update.message.reply_text("Использование: /login <ID>", reply_markup=get_main_keyboard())
         return
     if text == "🆔 Мой ID":
         await my_id(update, context)
         return
     if text == "Оценить книгу":
-        logger.info("Попытка вызвать rate из handle_text")
         await rate_book(update, context)
         return
     if text == "📚 Мои оценки":
@@ -418,7 +434,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🚪 Выход":
         await logout(update, context)
         return
-    
+
     # 1. Ожидание поискового запроса
     if context.user_data.get("awaiting_find"):
         await do_find(update, context, text)
@@ -472,12 +488,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(f"Фильтрую по жанру: «{escape_html(genre_query)}»...", parse_mode='HTML')
         try:
-            resp = requests.post(
+            resp = post_with_retry(
                 f"{API_BASE_URL}/filter_recommendations",
                 json={"titles": last_en, "genre_query": genre_query},
-                timeout=30
+                timeout=45
             )
-            resp.raise_for_status()
             filtered = resp.json()
             if not filtered:
                 await update.message.reply_text("Книг с таким жанром в рекомендациях не найдено.", reply_markup=get_main_keyboard())
@@ -493,7 +508,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("awaiting_genre_filter", None)
         return
 
-        # 4. Ожидание ID для удаления оценки
+    # 5. Ожидание ID для удаления оценки
     if context.user_data.get("awaiting_delete_rating"):
         if text.isdigit():
             book_id = int(text)
@@ -503,15 +518,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text(f"Удаляю оценку для книги ID {book_id}...", reply_markup=get_main_keyboard())
                 try:
-                    resp = requests.post(f"{API_BASE_URL}/delete_rating", json={"user_id": api_id, "book_id": book_id}, timeout=10)
-                    if resp.status_code == 200:
-                        await update.message.reply_text(f"✅ Оценка для книги ID {book_id} удалена.", reply_markup=get_main_keyboard())
-                        # Предложить показать обновлённые оценки
-                        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Показать обновлённые оценки", callback_data="show_ratings")]])
-                        await update.message.reply_text("Хотите увидеть обновлённый список?", reply_markup=keyboard)
-                    else:
-                        error = resp.json().get("detail", "Неизвестная ошибка")
-                        await update.message.reply_text(f"❌ Ошибка при удалении: {error}", reply_markup=get_main_keyboard())
+                    resp = post_with_retry(f"{API_BASE_URL}/delete_rating", json={"user_id": api_id, "book_id": book_id}, timeout=45)
+                    await update.message.reply_text(f"✅ Оценка для книги ID {book_id} удалена.", reply_markup=get_main_keyboard())
+                    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Показать обновлённые оценки", callback_data="show_ratings")]])
+                    await update.message.reply_text("Хотите увидеть обновлённый список?", reply_markup=keyboard)
                 except Exception as e:
                     logger.error(f"delete_rating error: {e}")
                     await update.message.reply_text("Не удалось соединиться с сервером.", reply_markup=get_main_keyboard())
@@ -519,14 +529,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Пожалуйста, введите число – ID книги.", reply_markup=get_main_keyboard())
         context.user_data.pop("awaiting_delete_rating", None)
         return
-    # 5. Если нет активного состояния – пытаемся обработать как ID книги для обычных рекомендаций
+
+    # 6. Если нет активного состояния – пытаемся обработать как ID книги для обычных рекомендаций
     if text.isdigit():
         book_id = int(text)
         await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID <code>{book_id}</code>...",
                                         parse_mode='HTML', reply_markup=get_main_keyboard())
         try:
-            response = requests.post(f"{API_BASE_URL}/recommend", json={"book_id": book_id}, timeout=30)
-            response.raise_for_status()
+            response = post_with_retry(f"{API_BASE_URL}/recommend", json={"book_id": book_id}, timeout=45)
             data = response.json()
             recommendations = data.get("recommendations", [])
             recommendations_en = data.get("recommendations_en", [])
