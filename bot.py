@@ -149,7 +149,7 @@ async def do_recommend_personal(update: Update, context: ContextTypes.DEFAULT_TY
         for i, title in enumerate(books[:10], 1):
             safe_title = escape_html(title)
             lines.append(f"{i}. <b>{safe_title}</b>")
-        answer = "📚 Ваши персональные рекомендации:\n\n" + "\n".join(lines)
+        answer = "📚 <b>Ваши персональные рекомендации:</b>\n\n" + "\n".join(lines)
         await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"rec_personal error: {e}")
@@ -187,13 +187,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   /rate <ID_книги> <оценка> – оценить книгу (1-5)\n"
         "   /my_ratings – список ваших оценок\n"
         "   /rec_personal <ID_книги> – персональные рекомендации\n"
-        "   /delete_rating <ID> – удалить оценку\n\n"
+        "   /delete_rating <ID> – удалить оценку\n"
+        "   /cancel – отменить текущее действие\n\n"
         "📌 После поиска просто отправь ID книги (число)."
     )
     await update.message.reply_text(text, parse_mode='HTML', reply_markup=get_main_keyboard())
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отменяет текущее действие пользователя."""
     states = [
         "awaiting_find", "awaiting_rec_personal", "awaiting_rate_step",
         "awaiting_genre_filter", "awaiting_delete_rating", "awaiting_login_id"
@@ -298,8 +298,7 @@ async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ratings:
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Удалить оценку", callback_data="delete_rating")]])
             await update.message.reply_text(
-                "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.\n"
-                "Или используйте команду /delete_rating <ID>.",
+                "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.\nИли используйте команду /delete_rating <ID>.",
                 reply_markup=keyboard
             )
     except Exception as e:
@@ -322,6 +321,8 @@ async def delete_rating_command(update: Update, context: ContextTypes.DEFAULT_TY
         try:
             resp = post_with_retry(f"{API_BASE_URL}/delete_rating", json={"user_id": api_id, "book_id": book_id}, timeout=45)
             await update.message.reply_text(f"✅ Оценка для книги ID {book_id} удалена.", reply_markup=get_main_keyboard())
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Показать обновлённые оценки", callback_data="show_ratings")]])
+            await update.message.reply_text("Хотите увидеть обновлённый список?", reply_markup=keyboard)
         except Exception as e:
             logger.error(f"delete_rating error: {e}")
             await update.message.reply_text("Не удалось соединиться с сервером.", reply_markup=get_main_keyboard())
@@ -436,20 +437,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     logger.info(f"Получен текст: '{text}'")
 
-    # Обработка русских кнопок главного меню
-    menu_actions = {
-        "🏠 Главное меню": start,
-        "🔍 Поиск книги": find_books,
-        "🎯 Персональные рекомендации": recommend_personal,
-        "📝 Регистрация": register,
-        "🔑 Вход": lambda u, c: u.message.reply_text("Использование: /login <ID>", reply_markup=get_main_keyboard()),
-        "🆔 Мой ID": my_id,
-        "⭐ Оценить книгу": rate_book,
-        "📚 Мои оценки": my_ratings,
-        "🚪 Выход": logout
-    }
-    if text in menu_actions:
-        await menu_actions[text](update, context)
+    # Русские кнопки главного меню
+    if text == "🏠 Главное меню":
+        await start(update, context)
+        return
+    if text == "🔍 Поиск книги":
+        await find_books(update, context)
+        return
+    if text == "🎯 Персональные рекомендации":
+        await recommend_personal(update, context)
+        return
+    if text == "📝 Регистрация":
+        await register(update, context)
+        return
+    if text == "🔑 Вход":
+        await login(update, context)   # вызов обработчика /login
+        return
+    if text == "🆔 Мой ID":
+        await my_id(update, context)
+        return
+    if text == "⭐ Оценить книгу":
+        await rate_book(update, context)
+        return
+    if text == "📚 Мои оценки":
+        await my_ratings(update, context)
+        return
+    if text == "🚪 Выход":
+        await logout(update, context)
         return
 
     # Ожидание ввода ID для входа
@@ -536,7 +550,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not filtered:
                 await update.message.reply_text("Книг с таким жанром в рекомендациях не найдено.", reply_markup=get_main_keyboard())
             else:
-                msg = "📚 Отфильтрованные рекомендации:\n\n"
+                msg = "📚 <b>Отфильтрованные рекомендации:</b>\n\n"
                 for i, title in enumerate(filtered[:10], 1):
                     msg += f"{i}. <b>{escape_html(title)}</b>\n"
                 await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
@@ -584,7 +598,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not recommendations:
                 await update.message.reply_text("😕 Для этой книги не нашлось рекомендаций.", reply_markup=get_main_keyboard())
                 return
-            answer = "📚 Обычные рекомендации (без учёта вашего профиля):\n\n"
+            answer = "📚 <b>Обычные рекомендации (без учёта вашего профиля):</b>\n\n"
             for i, book in enumerate(recommendations[:10], 1):
                 safe_title = escape_html(book)
                 answer += f"{i}. {safe_title}\n"
@@ -601,7 +615,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(
             "Пожалуйста, отправь ID книги (число) из списка после /find.\n"
-            "Используй /find <название> для поиска, /rec_personal для персональных рекомендаций.",
+            "Используй /find <название> для поиска, /rec_personal для персональных рекомендаций.\n"
+            "Для отмены текущего действия введите /cancel.",
             parse_mode='HTML', reply_markup=get_main_keyboard()
         )
 
