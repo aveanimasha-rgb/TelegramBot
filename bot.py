@@ -24,6 +24,9 @@ API_BASE_URL = "https://revolshtilil-book-recommendation-bot.hf.space"
 
 # --- Функции для повторных запросов (обход "холодного старта") ---
 def post_with_retry(url, json=None, max_retries=2, timeout=45):
+    """
+    Выполняет POST-запрос с автоматическим повтором при ошибке соединения или тайм-ауте.
+    """
     for attempt in range(max_retries):
         try:
             resp = requests.post(url, json=json, timeout=timeout)
@@ -36,6 +39,9 @@ def post_with_retry(url, json=None, max_retries=2, timeout=45):
             time.sleep(3)
 
 def get_with_retry(url, max_retries=2, timeout=45):
+    """
+    Выполняет GET-запрос с автоматическим повтором при ошибке соединения или тайм-ауте.
+    """
     for attempt in range(max_retries):
         try:
             resp = requests.get(url, timeout=timeout)
@@ -84,8 +90,9 @@ def delete_api_user_id(telegram_id):
 
 init_sessions_db()
 
-# --- Вспомогательная функция для безопасного HTML ---
+# --- Вспомогательная функция для безопасного HTML (экранирование) ---
 def escape_html(text: str) -> str:
+    """Заменяет символы, опасные для HTML-разметки Telegram."""
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 # --- Клавиатура с кнопками быстрых команд ---
@@ -94,11 +101,11 @@ def get_main_keyboard():
         [KeyboardButton("🏠 Главное меню")],
         [KeyboardButton("🔍 Поиск книги"), KeyboardButton("🎯 Персональные рекомендации")],
         [KeyboardButton("📝 Регистрация"), KeyboardButton("🔑 Вход"), KeyboardButton("🆔 Мой ID")],
-        [KeyboardButton("⭐ Оценить книгу"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")]
+        [KeyboardButton("/rate"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")]
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
-# --- Вспомогательная функция для загрузки api_user_id ---
+# --- Вспомогательная функция для загрузки api_user_id в context.user_data ---
 async def ensure_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     api_user_id = get_api_user_id(telegram_id)
@@ -108,10 +115,10 @@ async def ensure_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("api_user_id", None)
     return api_user_id
 
-# --- Кэш результатов поиска ---
+# --- Поиск книг (кеш результатов) ---
 user_search_results = {}
 
-# --- Основные действия ---
+# --- Основные действия (отделены от команд для переиспользования) ---
 async def do_find(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
     await update.message.reply_text(f"🔎 Ищу книги по запросу «{escape_html(query)}»...",
                                     parse_mode='HTML', reply_markup=get_main_keyboard())
@@ -129,7 +136,7 @@ async def do_find(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str
             safe_title = escape_html(book['title_ru'])
             msg += f"ID: <code>{book['id']}</code> — {safe_title}\n"
         msg += "\n✏️ Чтобы получить обычные рекомендации, отправь ID книги (просто число).\n"
-        msg += "Для персональных используй /rec_personal <ID>"
+        msg += "Для персональных используй /rec_personal &lt;ID&gt;"
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"find_books error: {e}")
@@ -177,37 +184,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "📚 <b>Книжный рекомендательный бот</b>\n\n"
         "🔹 <b>Без регистрации:</b>\n"
-        "   /find <часть названия> – найти книгу\n"
+        "   /find &lt;часть названия&gt; – найти книгу\n"
         "   Отправь ID книги (число) – получу обычные рекомендации\n\n"
         "🔹 <b>С регистрацией</b> (все оценки сохраняются):\n"
         "   /register – создать новый профиль\n"
-        "   /login <ID> – войти в существующий профиль\n"
+        "   /login &lt;ID&gt; – войти в существующий профиль\n"
         "   /logout – выйти из профиля\n"
         "   /my_id – показать свой ID в системе\n"
-        "   /rate <ID_книги> <оценка> – оценить книгу (1-5)\n"
+        "   /rate &lt;ID_книги&gt; &lt;оценка&gt; – оценить книгу (1-5)\n"
         "   /my_ratings – список ваших оценок\n"
-        "   /rec_personal <ID_книги> – персональные рекомендации\n"
-        "   /delete_rating <ID> – удалить оценку\n"
-        "   /cancel – отменить текущее действие\n\n"
+        "   /rec_personal &lt;ID_книги&gt; – персональные рекомендации\n\n"
         "📌 После поиска просто отправь ID книги (число)."
     )
     await update.message.reply_text(text, parse_mode='HTML', reply_markup=get_main_keyboard())
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    states = [
-        "awaiting_find", "awaiting_rec_personal", "awaiting_rate_step",
-        "awaiting_genre_filter", "awaiting_delete_rating", "awaiting_login_id"
-    ]
-    cleared = False
-    for state in states:
-        if context.user_data.pop(state, None):
-            cleared = True
-    context.user_data.pop("awaiting_rate_book_id", None)
-    context.user_data.pop("last_recommendations_en", None)
-    if cleared:
-        await update.message.reply_text("❌ Действие отменено.", reply_markup=get_main_keyboard())
-    else:
-        await update.message.reply_text("Нет активного действия для отмены.", reply_markup=get_main_keyboard())
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -228,33 +217,28 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ошибка регистрации на сервере.", reply_markup=get_main_keyboard())
 
 async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        try:
-            api_user_id = int(context.args[0])
-        except ValueError:
-            await update.message.reply_text("ID должен быть числом.", reply_markup=get_main_keyboard())
-            return
-        try:
-            resp = get_with_retry(f"{API_BASE_URL}/user_ratings/{api_user_id}", timeout=45)
-            if resp.status_code == 404:
-                await update.message.reply_text("Пользователь с таким ID не найден. Зарегистрируйтесь с помощью /register.",
-                                                reply_markup=get_main_keyboard())
-                return
-            resp.raise_for_status()
-        except Exception:
-            await update.message.reply_text("Ошибка проверки. Попробуйте позже.", reply_markup=get_main_keyboard())
-            return
-        telegram_id = update.effective_user.id
-        set_api_user_id(telegram_id, api_user_id)
-        context.user_data["api_user_id"] = api_user_id
-        await update.message.reply_text(f"✅ Вход выполнен. Ваш ID: <code>{api_user_id}</code>",
-                                        parse_mode='HTML', reply_markup=get_main_keyboard())
-    else:
-        context.user_data["awaiting_login_id"] = True
-        await update.message.reply_text(
-            "🔑 Введите ваш ID (число), который вы получили при регистрации:",
-            parse_mode='HTML', reply_markup=get_main_keyboard()
-        )
+    if not context.args:
+        await update.message.reply_text("Использование: /login <ID>", parse_mode='HTML', reply_markup=get_main_keyboard())
+        return
+    try:
+        api_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("ID должен быть числом.", reply_markup=get_main_keyboard())
+        return
+    try:
+        resp = get_with_retry(f"{API_BASE_URL}/user_ratings/{api_user_id}", timeout=45)
+    except Exception:
+        await update.message.reply_text("Ошибка проверки. Попробуйте позже.", reply_markup=get_main_keyboard())
+        return
+    if resp.status_code == 404:
+        await update.message.reply_text("Пользователь с таким ID не найден. Зарегистрируйтесь с помощью /register.",
+                                        reply_markup=get_main_keyboard())
+        return
+    telegram_id = update.effective_user.id
+    set_api_user_id(telegram_id, api_user_id)
+    context.user_data["api_user_id"] = api_user_id
+    await update.message.reply_text(f"✅ Вход выполнен. Ваш ID: <code>{api_user_id}</code>",
+                                    parse_mode='HTML', reply_markup=get_main_keyboard())
 
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
@@ -298,37 +282,12 @@ async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ratings:
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Удалить оценку", callback_data="delete_rating")]])
             await update.message.reply_text(
-                "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.\nИли используйте команду /delete_rating <ID>.",
+                "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.",
                 reply_markup=keyboard
             )
     except Exception as e:
         logger.error(f"my_ratings error: {e}")
         await update.message.reply_text("Ошибка получения оценок.", reply_markup=get_main_keyboard())
-
-async def delete_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api_id = await ensure_session(update, context)
-    if not api_id:
-        await update.message.reply_text("Сначала войдите в профиль: /register или /login.",
-                                        reply_markup=get_main_keyboard())
-        return
-    if context.args:
-        try:
-            book_id = int(context.args[0])
-        except ValueError:
-            await update.message.reply_text("ID книги должен быть числом.", reply_markup=get_main_keyboard())
-            return
-        await update.message.reply_text(f"Удаляю оценку для книги ID {book_id}...", reply_markup=get_main_keyboard())
-        try:
-            resp = post_with_retry(f"{API_BASE_URL}/delete_rating", json={"user_id": api_id, "book_id": book_id}, timeout=45)
-            await update.message.reply_text(f"✅ Оценка для книги ID {book_id} удалена.", reply_markup=get_main_keyboard())
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Показать обновлённые оценки", callback_data="show_ratings")]])
-            await update.message.reply_text("Хотите увидеть обновлённый список?", reply_markup=keyboard)
-        except Exception as e:
-            logger.error(f"delete_rating error: {e}")
-            await update.message.reply_text("Не удалось соединиться с сервером.", reply_markup=get_main_keyboard())
-    else:
-        context.user_data["awaiting_delete_rating"] = True
-        await update.message.reply_text("🗑 Введите ID книги, оценку которой хотите удалить:", reply_markup=get_main_keyboard())
 
 async def delete_rating_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -373,7 +332,8 @@ async def find_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["awaiting_find"] = True
     await update.message.reply_text(
         "🔎 Введите название книги (или его часть):",
-        parse_mode='HTML', reply_markup=get_main_keyboard()
+        parse_mode='HTML',
+        reply_markup=get_main_keyboard()
     )
 
 async def recommend_personal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -389,12 +349,20 @@ async def recommend_personal(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("ID книги должен быть числом.", reply_markup=get_main_keyboard())
             return
         await do_recommend_personal(update, context, api_id, book_id)
-    else:
-        context.user_data["awaiting_rec_personal"] = True
-        await update.message.reply_text(
-            "📚 Введите ID книги, для которой хотите получить персональные рекомендации:",
-            parse_mode='HTML', reply_markup=get_main_keyboard()
-        )
+        return
+    await update.message.reply_text(
+        "📚 <b>Как получить персональные рекомендации</b>\n\n"
+        "1️⃣ Найдите интересующую вас книгу командой:\n"
+        "   <code>/find &lt;часть названия&gt;</code>\n"
+        "   Например: <code>/find Властелин</code>\n\n"
+        "2️⃣ В результатах поиска вы увидите <b>ID книги</b> (число).\n\n"
+        "3️⃣ Отправьте команду с этим ID:\n"
+        "   <code>/rec_personal &lt;ID&gt;</code>\n"
+        "   Например: <code>/rec_personal 12345</code>\n\n"
+        "🔹 <i>Также вы можете просто отправить ID книги из последнего поиска, и я дам обычные рекомендации (без учёта профиля).</i>",
+        parse_mode='HTML',
+        reply_markup=get_main_keyboard()
+    )
 
 async def rate_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_id = await ensure_session(update, context)
@@ -417,7 +385,8 @@ async def rate_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["awaiting_rate_step"] = 1
     await update.message.reply_text(
         "✏️ Введите ID книги, которую хотите оценить:",
-        parse_mode='HTML', reply_markup=get_main_keyboard()
+        parse_mode='HTML',
+        reply_markup=get_main_keyboard()
     )
 
 async def handle_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -432,12 +401,12 @@ async def handle_filter_callback(update: Update, context: ContextTypes.DEFAULT_T
     else:
         await query.edit_message_text("❌ Фильтрация отменена.", reply_markup=None)
 
-# --- Обработчик обычных текстовых сообщений ---
+# --- Обработчик обычных текстовых сообщений (ID книги и состояния ожидания) ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    logger.info(f"Получен текст: '{text}'")
+    logger.info(f"Received text: '{text}' (repr: {repr(text)})")
 
-    # Русские кнопки главного меню
+    # Обработка русских кнопок главного меню
     if text == "🏠 Главное меню":
         await start(update, context)
         return
@@ -451,12 +420,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await register(update, context)
         return
     if text == "🔑 Вход":
-        await login(update, context)   # вызов обработчика /login
+        await update.message.reply_text("Использование: /login <ID>", reply_markup=get_main_keyboard())
         return
     if text == "🆔 Мой ID":
         await my_id(update, context)
         return
-    if text == "⭐ Оценить книгу":
+    if text == "Оценить книгу":
         await rate_book(update, context)
         return
     if text == "📚 Мои оценки":
@@ -464,29 +433,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if text == "🚪 Выход":
         await logout(update, context)
-        return
-
-    # Ожидание ввода ID для входа
-    if context.user_data.get("awaiting_login_id"):
-        if text.isdigit():
-            api_user_id = int(text)
-            try:
-                resp = get_with_retry(f"{API_BASE_URL}/user_ratings/{api_user_id}", timeout=45)
-                if resp.status_code == 404:
-                    await update.message.reply_text("Пользователь с таким ID не найден. Зарегистрируйтесь с помощью /register.",
-                                                    reply_markup=get_main_keyboard())
-                else:
-                    resp.raise_for_status()
-                    telegram_id = update.effective_user.id
-                    set_api_user_id(telegram_id, api_user_id)
-                    context.user_data["api_user_id"] = api_user_id
-                    await update.message.reply_text(f"✅ Вход выполнен. Ваш ID: <code>{api_user_id}</code>",
-                                                    parse_mode='HTML', reply_markup=get_main_keyboard())
-            except Exception:
-                await update.message.reply_text("Ошибка проверки. Попробуйте позже.", reply_markup=get_main_keyboard())
-        else:
-            await update.message.reply_text("ID должен быть числом.", reply_markup=get_main_keyboard())
-        context.user_data.pop("awaiting_login_id", None)
         return
 
     # 1. Ожидание поискового запроса
@@ -531,7 +477,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Оценка должна быть числом.", reply_markup=get_main_keyboard())
         return
 
-    # 4. Фильтрация рекомендаций по жанру
+    # 4. Фильтрация рекомендаций по жанру (ввод после нажатия "Да")
     if context.user_data.get("awaiting_genre_filter"):
         genre_query = text
         last_en = context.user_data.get("last_recommendations_en", [])
@@ -539,6 +485,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Нет сохранённых рекомендаций для фильтрации.", reply_markup=get_main_keyboard())
             context.user_data.pop("awaiting_genre_filter", None)
             return
+
         await update.message.reply_text(f"Фильтрую по жанру: «{escape_html(genre_query)}»...", parse_mode='HTML')
         try:
             resp = post_with_retry(
@@ -583,7 +530,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("awaiting_delete_rating", None)
         return
 
-    # 6. Обычные рекомендации по ID книги
+    # 6. Если нет активного состояния – пытаемся обработать как ID книги для обычных рекомендаций
     if text.isdigit():
         book_id = int(text)
         await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID <code>{book_id}</code>...",
@@ -595,14 +542,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             recommendations_en = data.get("recommendations_en", [])
             if recommendations_en:
                 context.user_data['last_recommendations_en'] = recommendations_en
+
             if not recommendations:
                 await update.message.reply_text("😕 Для этой книги не нашлось рекомендаций.", reply_markup=get_main_keyboard())
                 return
+
             answer = "📚 <b>Обычные рекомендации (без учёта вашего профиля):</b>\n\n"
             for i, book in enumerate(recommendations[:10], 1):
                 safe_title = escape_html(book)
                 answer += f"{i}. {safe_title}\n"
             await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
+
+            # Предложить фильтрацию, если есть английские названия
             if recommendations_en:
                 keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton("Да", callback_data="filter_yes"),
@@ -615,17 +566,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(
             "Пожалуйста, отправь ID книги (число) из списка после /find.\n"
-            "Используй /find <название> для поиска, /rec_personal для персональных рекомендаций.\n"
-            "Для отмены текущего действия введите /cancel.",
+            "Используй /find &lt;название&gt; для поиска, /rec_personal для персональных рекомендаций.",
             parse_mode='HTML', reply_markup=get_main_keyboard()
         )
 
-# --- Веб-сервер и вебхук ---
+# --- Создание и настройка веб-хука и сервера ---
 async def main():
     application = Application.builder().token(TOKEN).updater(None).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("cancel", cancel))
     application.add_handler(CommandHandler("register", register))
     application.add_handler(CommandHandler("login", login))
     application.add_handler(CommandHandler("logout", logout))
@@ -634,7 +583,6 @@ async def main():
     application.add_handler(CommandHandler("my_ratings", my_ratings))
     application.add_handler(CommandHandler("rec_personal", recommend_personal))
     application.add_handler(CommandHandler("find", find_books))
-    application.add_handler(CommandHandler("delete_rating", delete_rating_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(CallbackQueryHandler(handle_filter_callback, pattern="^filter_"))
     application.add_handler(CallbackQueryHandler(delete_rating_callback, pattern="^delete_rating$"))
