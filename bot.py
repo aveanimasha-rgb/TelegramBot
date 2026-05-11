@@ -158,7 +158,7 @@ async def do_info(update: Update, context: ContextTypes.DEFAULT_TYPE, book_id: i
                f"<b>Название (англ):</b> {escape_html(data['title_en'])}\n"
                f"<b>Автор(ы):</b> {escape_html(data['authors']) if data['authors'] else '—'}\n"
                f"<b>Жанр(ы):</b> {escape_html(data['categories']) if data['categories'] else '—'}\n"
-               f"<b>Средняя оценка:</b> {data['average_rating'] if data['average_rating'] else '—'}\n"
+               f"<b>Средняя оценка:</b> {data['average_rating'] if data['average_rating'] else '—'}\n")
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"info error: {e}")
