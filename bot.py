@@ -639,7 +639,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Ошибка получения рекомендаций.", reply_markup=get_main_keyboard())
     else:
         await update.message.reply_text(
-            "Пожалуйста, выберите команду.\n"
+            "Пожалуйста, выберите команду.\n",
             parse_mode='HTML', reply_markup=get_main_keyboard()
         )
 
