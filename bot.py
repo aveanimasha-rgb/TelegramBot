@@ -87,7 +87,7 @@ def escape_html(text: str) -> str:
 
 def get_main_keyboard():
     buttons = [
-        [KeyboardButton("🏠 Главное меню")],
+        [KeyboardButton("🏠 Начать")],
         [KeyboardButton("🔍 Поиск книги"), KeyboardButton("🎯 Персональные рекомендации")],
         [KeyboardButton("📝 Регистрация"), KeyboardButton("🔑 Вход"), KeyboardButton("🆔 Мой ID")],
         [KeyboardButton("⭐ Оценить книгу"), KeyboardButton("📚 Мои оценки"), KeyboardButton("🚪 Выход")],
@@ -108,10 +108,10 @@ user_search_results = {}
 
 # --- Основные действия ---
 async def do_find(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
-    await update.message.reply_text(f"🔎 Ищу книги по запросу «{escape_html(query)}»...",
+    await update.message.reply_text(f"🔎 Ищу совпадения по запросу «{escape_html(query)}»...",
                                     parse_mode='HTML', reply_markup=get_main_keyboard())
     try:
-        response = post_with_retry(f"{API_BASE_URL}/find", json={"query": query}, timeout=45)
+        response = post_with_retry(f"{API_BASE_URL}/find", json={"query": query}, timeout=30)
         books = response.json()
         if not books:
             await update.message.reply_text("😕 Ничего не найдено. Попробуй другое название.",
@@ -413,7 +413,7 @@ async def handle_filter_callback(update: Update, context: ContextTypes.DEFAULT_T
     if query.data == "filter_yes":
         context.user_data["awaiting_genre_filter"] = True
         await query.edit_message_text(
-            "🔍 Введите часть названия жанра (например, 'фантастика' или 'детектив'):",
+            "🔍 Введите название жанра (например, 'художественное' или 'детектив'):",
             reply_markup=None
         )
     else:
@@ -570,7 +570,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 msg = "📚 <b>Отфильтрованные рекомендации:</b>\n\n"
                 for i, title in enumerate(filtered[:10], 1):
-                    msg += f"{i}. <b>{escape_html(title)}</b>\n"
+                    msg += f"{i}. {escape_html(title)}\n"
                 await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
         except Exception as e:
             logger.error(f"filter error: {e}")
@@ -639,9 +639,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Ошибка получения рекомендаций.", reply_markup=get_main_keyboard())
     else:
         await update.message.reply_text(
-            "Пожалуйста, отправь ID книги (число) из списка после /find.\n"
-            "Используй /find &lt;название&gt; для поиска, /rec_personal для персональных рекомендаций.\n"
-            "Для отмены текущего действия введите /cancel.",
+            "Пожалуйста, выберите команду.\n"
             parse_mode='HTML', reply_markup=get_main_keyboard()
         )
 
