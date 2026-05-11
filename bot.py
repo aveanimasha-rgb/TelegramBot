@@ -126,7 +126,7 @@ async def do_find(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str
             msg += f"ID: <code>{book['id']}</code> — {safe_title}\n"
         # Экранируем плейсхолдер в конце (чтобы Telegram не ждал тег)
         msg += "\n✏️ Чтобы получить быстрые рекомендации, отправьте ID книги (просто число).\n"
-        msg += "Для персональных используйте команду /rec_personal"
+        msg += "Для персональных используйте кнопку Персональные рекомендации"
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"find_books error: {e}")
@@ -278,7 +278,7 @@ async def my_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ratings:
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Удалить оценку", callback_data="delete_rating")]])
             await update.message.reply_text(
-                "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.\nИли используйте команду /delete_rating &lt;ID&gt;.",
+                "Вы можете удалить одну из своих оценок, нажав на кнопку ниже.",
                 reply_markup=keyboard
             )
     except Exception as e:
@@ -336,7 +336,7 @@ async def show_ratings_callback(update: Update, context: ContextTypes.DEFAULT_TY
         msg = "<b>Ваши оценки:<b>\n"
         for r in ratings[:20]:
             safe_title = escape_html(r['title_ru'])
-            msg += f"• ID <code>{r['book_id']}<code> — {safe_title} — оценка: <b>{r['rating']}<b>\n"
+            msg += f"• ID <code>{r['book_id']}</code> — {safe_title} — оценка: <b>{r['rating']}<b>\n"
         if len(ratings) > 20:
             msg += f"\n... и ещё {len(ratings)-20} оценок."
         await query.edit_message_text(msg, parse_mode='HTML')
@@ -611,7 +611,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text.isdigit():
         book_id = int(text)
-        await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID <code>{book_id}<code>...",
+        await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID <code>{book_id}</code>...",
                                         parse_mode='HTML', reply_markup=get_main_keyboard())
         try:
             response = post_with_retry(f"{API_BASE_URL}/recommend", json={"book_id": book_id}, timeout=45)
