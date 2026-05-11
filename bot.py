@@ -188,22 +188,22 @@ async def do_book_info(update: Update, context: ContextTypes.DEFAULT_TYPE, book_
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ensure_session(update, context)
     text = (
-        "📚 <b>Книжный рекомендательный бот</b>\n\n"
-        "🔹 <b>Без регистрации:</b>\n"
-        "   /find <часть названия> – найти книгу\n"
-        "   Отправь ID книги (число) – получу обычные рекомендации\n\n"
-        "🔹 <b>С регистрацией</b> (все оценки сохраняются):\n"
-        "   /register – создать новый профиль (потребуется пароль)\n"
-        "   /login – войти в существующий профиль (ID + пароль)\n"
-        "   /logout – выйти из профиля\n"
-        "   /my_id – показать свой ID в системе\n"
-        "   /rate <ID_книги> <оценка> – оценить книгу (1-5)\n"
-        "   /my_ratings – список ваших оценок\n"
-        "   /rec_personal <ID_книги> – персональные рекомендации\n"
-        "   /book_info <ID_книги> – информация о книге\n"
-        "   /cancel – отменить текущее действие\n\n"
-        "📌 После поиска просто отправь ID книги (число)."
-    )
+    "📚 <b>Книжный рекомендательный бот</b>\n\n"
+    "🔹 <b>Без регистрации:</b>\n"
+    "   /find &lt;часть названия&gt; – найти книгу\n"
+    "   Отправь ID книги (число) – получу обычные рекомендации\n\n"
+    "🔹 <b>С регистрацией</b> (все оценки сохраняются):\n"
+    "   /register – создать новый профиль (потребуется пароль)\n"
+    "   /login – войти в существующий профиль (ID + пароль)\n"
+    "   /logout – выйти из профиля\n"
+    "   /my_id – показать свой ID в системе\n"
+    "   /rate &lt;ID_книги&gt; &lt;оценка&gt; – оценить книгу (1-5)\n"
+    "   /my_ratings – список ваших оценок\n"
+    "   /rec_personal &lt;ID_книги&gt; – персональные рекомендации\n"
+    "   /book_info &lt;ID_книги&gt; – информация о книге\n"
+    "   /cancel – отменить текущее действие\n\n"
+    "📌 После поиска просто отправь ID книги (число)."
+)
     await update.message.reply_text(text, parse_mode='HTML', reply_markup=get_main_keyboard())
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -377,7 +377,7 @@ async def rate_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Сначала войдите в профиль: /register или /login.",
                                         reply_markup=get_main_keyboard())
         return
-    if len(context.args) == 2:
+    if context.args and len(context.args) == 2:
         try:
             book_id = int(context.args[0])
             rating = int(context.args[1])
