@@ -125,8 +125,8 @@ async def do_find(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str
             safe_title = escape_html(book['title_ru'])
             msg += f"ID: <code>{book['id']}</code> — {safe_title}\n"
         # Экранируем плейсхолдер в конце (чтобы Telegram не ждал тег)
-        msg += "\n✏️ Чтобы получить обычные рекомендации, отправь ID книги (просто число).\n"
-        msg += "Для персональных используй /rec_personal &lt;ID&gt;"
+        msg += "\n✏️ Чтобы получить быстрые рекомендации, отправьте ID книги (просто число).\n"
+        msg += "Для персональных используйте команду /rec_personal"
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
         logger.error(f"find_books error: {e}")
@@ -145,7 +145,7 @@ async def do_recommend_personal(update: Update, context: ContextTypes.DEFAULT_TY
         lines = []
         for i, title in enumerate(books[:10], 1):
             safe_title = escape_html(title)
-            lines.append(f"{i}. <b>{safe_title}</b>")
+            lines.append(f"{i}. {safe_title}")
         answer = "📚 <b>Ваши персональные рекомендации:</b>\n\n" + "\n".join(lines)
         await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
     except Exception as e:
@@ -191,11 +191,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ensure_session(update, context)
     text = (
         "📚 <b>Книжный рекомендательный бот</b>\n\n"
-        "🔹 <b>Без регистрации:</b>\n"
+        "🔹 <b>Быстрые рекомендации:</b>\n"
         "   /find &lt;часть названия&gt; – найти книгу\n"
-        "   Отправь ID книги (число) – получу обычные рекомендации\n\n"
-        "🔹 <b>С регистрацией</b> (все оценки сохраняются):\n"
-        "   /register – создать новый профиль (потребуется пароль)\n"
+        "   Отправьте ID книги (число) – получить рекомендации\n\n"
+        "🔹 <b>Персональные рекомендации</b>:\n"
+        "   /register – создать новый профиль\n"
         "   /login – войти в существующий профиль (ID + пароль)\n"
         "   /logout – выйти из профиля\n"
         "   /my_id – показать свой ID в системе\n"
@@ -203,7 +203,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   /my_ratings – список ваших оценок\n"
         "   /rec_personal &lt;ID_книги&gt; – персональные рекомендации\n"
         "   /book_info &lt;ID_книги&gt; – информация о книге\n"
-        "   /cancel – отменить текущее действие\n\n"
         "📌 После поиска просто отправь ID книги (число)."
     )
     await update.message.reply_text(text, parse_mode='HTML', reply_markup=get_main_keyboard())
@@ -334,10 +333,10 @@ async def show_ratings_callback(update: Update, context: ContextTypes.DEFAULT_TY
         if not ratings:
             await query.edit_message_text("У вас пока нет оценок.")
             return
-        msg = "&lt;b&gt;Ваши оценки:&lt;/b&gt;\n"
+        msg = "<b>Ваши оценки:<b>\n"
         for r in ratings[:20]:
             safe_title = escape_html(r['title_ru'])
-            msg += f"• ID &lt;code&gt;{r['book_id']}&lt;/code&gt; — {safe_title} — оценка: &lt;b&gt;{r['rating']}&lt;/b&gt;\n"
+            msg += f"• ID <code>{r['book_id']}<code> — {safe_title} — оценка: <b>{r['rating']}<b>\n"
         if len(ratings) > 20:
             msg += f"\n... и ещё {len(ratings)-20} оценок."
         await query.edit_message_text(msg, parse_mode='HTML')
@@ -567,7 +566,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                    json={"titles": last_en, "genre_query": genre_query}, timeout=45)
             filtered = resp.json()
             if not filtered:
-                await update.message.reply_text("Книг с таким жанром в рекомендациях не найдено.", reply_markup=get_main_keyboard())
+                await update.message.reply_text("Книг с таким жанром не найдено среди рекомендованных.", reply_markup=get_main_keyboard())
             else:
                 msg = "📚 <b>Отфильтрованные рекомендации:</b>\n\n"
                 for i, title in enumerate(filtered[:10], 1):
@@ -612,7 +611,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text.isdigit():
         book_id = int(text)
-        await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID &lt;code&gt;{book_id}&lt;/code&gt;...",
+        await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID <code>{book_id}<code>...",
                                         parse_mode='HTML', reply_markup=get_main_keyboard())
         try:
             response = post_with_retry(f"{API_BASE_URL}/recommend", json={"book_id": book_id}, timeout=45)
@@ -624,7 +623,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not recommendations:
                 await update.message.reply_text("😕 Для этой книги не нашлось рекомендаций.", reply_markup=get_main_keyboard())
                 return
-            answer = "📚 <b>Обычные рекомендации (без учёта вашего профиля):</b>\n\n"
+            answer = "📚 <b>Быстрые рекомендации (без учёта вашего профиля):</b>\n\n"
             for i, book in enumerate(recommendations[:10], 1):
                 safe_title = escape_html(book)
                 answer += f"{i}. {safe_title}\n"
