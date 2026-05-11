@@ -138,16 +138,29 @@ async def do_recommend_personal(update: Update, context: ContextTypes.DEFAULT_TY
     payload = {"user_id": api_id, "book_id": book_id, "alpha": 0.6, "top_n": 10}
     try:
         resp = post_with_retry(f"{API_BASE_URL}/recommend_personal", json=payload, timeout=45)
-        books = resp.json()
-        if not books:
+        data = resp.json()
+        recommendations = data.get("recommendations", [])
+        recommendations_en = data.get("recommendations_en", [])
+        if not recommendations:
             await update.message.reply_text("Рекомендаций не найдено.", reply_markup=get_main_keyboard())
             return
+        # Сохраняем английские названия для фильтрации
+        if recommendations_en:
+            context.user_data['last_recommendations_en'] = recommendations_en
+        # Формируем и отправляем список русских названий
         lines = []
-        for i, title in enumerate(books[:10], 1):
+        for i, title in enumerate(recommendations[:10], 1):
             safe_title = escape_html(title)
-            lines.append(f"{i}. {safe_title}")
+            lines.append(f"{i}. <b>{safe_title}</b>")
         answer = "📚 <b>Ваши персональные рекомендации:</b>\n\n" + "\n".join(lines)
         await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
+        # Предлагаем фильтрацию, если есть английские названия
+        if recommendations_en:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Да", callback_data="filter_yes"),
+                 InlineKeyboardButton("Нет", callback_data="filter_no")]
+            ])
+            await update.message.reply_text("Хотите отфильтровать эти рекомендации по жанру?", reply_markup=keyboard)
     except Exception as e:
         logger.error(f"rec_personal error: {e}")
         await update.message.reply_text("Не удалось получить персональные рекомендации. Возможно, у вас мало оценок?",
@@ -611,7 +624,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text.isdigit():
         book_id = int(text)
-        await update.message.reply_text(f"🔍 Получаю обычные рекомендации для книги ID <code>{book_id}</code>...",
+        await update.message.reply_text(f"🔍 Получаю быстрые рекомендации для книги ID <code>{book_id}</code>...",
                                         parse_mode='HTML', reply_markup=get_main_keyboard())
         try:
             response = post_with_retry(f"{API_BASE_URL}/recommend", json={"book_id": book_id}, timeout=45)
