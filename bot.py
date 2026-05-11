@@ -438,7 +438,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Получен текст: '{text}'")
 
     # Обработка кнопок главного меню
-    if text == "🏠 Главное меню":
+    if text == "🏠 Начать":
         await start(update, context)
         return
     if text == "🔍 Поиск книги":
