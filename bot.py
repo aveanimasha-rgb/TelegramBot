@@ -139,6 +139,7 @@ async def do_recommend_personal(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         resp = post_with_retry(f"{API_BASE_URL}/recommend_personal", json=payload, timeout=45)
         data = resp.json()
+        original_title = data.get("original_title_ru", "неизвестной книги")
         recommendations = data.get("recommendations", [])
         recommendations_en = data.get("recommendations_en", [])
         if not recommendations:
@@ -152,7 +153,7 @@ async def do_recommend_personal(update: Update, context: ContextTypes.DEFAULT_TY
         for i, title in enumerate(recommendations[:10], 1):
             safe_title = escape_html(title)
             lines.append(f"{i}. <b>{safe_title}</b>")
-        answer = "📚 <b>Ваши персональные рекомендации:</b>\n\n" + "\n".join(lines)
+        answer = f"📚 <b>Персональные рекомендации для книги «{escape_html(original_title)}»:</b>\n\n" + "\n".join(lines)
         await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
         # Предлагаем фильтрацию, если есть английские названия
         if recommendations_en:
@@ -583,7 +584,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 msg = "📚 <b>Отфильтрованные рекомендации:</b>\n\n"
                 for i, title in enumerate(filtered[:10], 1):
-                    msg += f"{i}. {escape_html(title)}\n"
+                    msg += f"{i}. <b>{escape_html(title)}</b>\n"
                 await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_keyboard())
         except Exception as e:
             logger.error(f"filter error: {e}")
@@ -629,6 +630,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             response = post_with_retry(f"{API_BASE_URL}/recommend", json={"book_id": book_id}, timeout=45)
             data = response.json()
+            original_title = data.get("original_title_ru", "неизвестной книги")
             recommendations = data.get("recommendations", [])
             recommendations_en = data.get("recommendations_en", [])
             if recommendations_en:
@@ -636,7 +638,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not recommendations:
                 await update.message.reply_text("😕 Для этой книги не нашлось рекомендаций.", reply_markup=get_main_keyboard())
                 return
-            answer = "📚 <b>Быстрые рекомендации (без учёта вашего профиля):</b>\n\n"
+            answer = f"📚 <b>Быстрые рекомендации для книги «{escape_html(original_title)}»:</b>\n\n"
             for i, book in enumerate(recommendations[:10], 1):
                 safe_title = escape_html(book)
                 answer += f"{i}. {safe_title}\n"
