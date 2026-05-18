@@ -20,6 +20,16 @@ URL = os.environ.get("RENDER_EXTERNAL_URL")
 PORT = 8000
 API_BASE_URL = "https://revolshtilil-book-recommendation-bot.hf.space"
 
+GENRE_BUTTONS = {
+    "Художественная литература": "худ. лит-ра",
+    "История": "история",
+    "Детская художественная литература": "детская",
+    "Биографии": "биография",
+    "Бизнес": "бизнес",
+    "Компьютеры": "компьютеры",
+    "Социология": "социология"
+}
+
 # --- Функции повторных запросов ---
 def post_with_retry(url, json=None, max_retries=2, timeout=45):
     for attempt in range(max_retries):
@@ -120,7 +130,7 @@ async def do_find(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str
         telegram_id = update.effective_user.id
         user_search_results[telegram_id] = books
         # Используем настоящие теги, но экранируем названия книг
-        msg = "📖 <b>Найденные книги:</b>\n\n"
+        msg = "📖 <b>Найденные ID книг:</b>\n\n"
         for book in books:
             safe_title = escape_html(book['title_ru'])
             msg += f"ID: <code>{book['id']}</code> — {safe_title}\n"
@@ -140,9 +150,9 @@ async def do_recommend_personal(update: Update, context: ContextTypes.DEFAULT_TY
         resp = post_with_retry(f"{API_BASE_URL}/recommend_personal", json=payload, timeout=45)
         data = resp.json()
         original_title = data.get("original_title_ru", "неизвестной книги")
-        recommendations = data.get("recommendations", [])
+        recs = data.get("recommendations", [])
         recommendations_en = data.get("recommendations_en", [])
-        if not recommendations:
+        if not recs:
             await update.message.reply_text("Рекомендаций не найдено.", reply_markup=get_main_keyboard())
             return
         # Сохраняем английские названия для фильтрации
@@ -150,9 +160,9 @@ async def do_recommend_personal(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data['last_recommendations_en'] = recommendations_en
         # Формируем и отправляем список русских названий
         lines = []
-        for i, title in enumerate(recommendations[:10], 1):
-            safe_title = escape_html(title)
-            lines.append(f"{i}. <b>{safe_title}</b>")
+        for i, title in enumerate(recs[:10], 1):
+            safe_title = escape_html(item['title_ru'])
+            lines.append(f"{i}. ID: <code>{item['id']}</code> — <b>{safe_title}</b>")
         answer = f"📚 <b>Персональные рекомендации для книги «{escape_html(original_title)}»:</b>\n\n" + "\n".join(lines)
         await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
         # Предлагаем фильтрацию, если есть английские названия
@@ -420,15 +430,50 @@ async def book_info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_book_info"] = True
         await update.message.reply_text("📖 Введите ID книги, информацию о которой хотите получить:",
                                         reply_markup=get_main_keyboard())
+async def handle_genre_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    genre_query = query.data.replace("genre_", "")
+    last_en = context.user_data.get("last_recommendations_en", [])
+    if not last_en:
+        await query.edit_message_text("Нет сохранённых рекомендаций для фильтрации.")
+        return
+    await query.edit_message_text(f"Фильтрую по жанру: «{genre_query}»...")
+    try:
+        resp = post_with_retry(
+            f"{API_BASE_URL}/filter_recommendations",
+            json={"titles": last_en, "genre_query": genre_query},
+            timeout=45
+        )
+        filtered = resp.json()
+        if not filtered:
+            await query.edit_message_text("Книг с таким жанром не найдено среди рекомендованных.")
+        else:
+            msg = "📚 <b>Отфильтрованные рекомендации:</b>\n\n"
+            for i, title in enumerate(filtered[:10], 1):
+                msg += f"{i}. {escape_html(title)}\n"
+            await query.edit_message_text(msg, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"filter error: {e}")
+        await query.edit_message_text("❌ Ошибка фильтрации.")
 
 async def handle_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == "filter_yes":
-        context.user_data["awaiting_genre_filter"] = True
+        keyboard = []
+        row = []
+        for i, (btn_text, genre_value) in enumerate(GENRE_BUTTONS.items()):
+            row.append(InlineKeyboardButton(btn_text, callback_data=f"genre_{genre_value}"))
+            if (i + 1) % 2 == 0:  # по 2 кнопки в ряд
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="filter_no")])
         await query.edit_message_text(
-            "🔍 Введите название жанра (например, 'художественное' или 'детектив'):",
-            reply_markup=None
+            "🎭 Выберите жанр для фильтрации:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
         await query.edit_message_text("❌ Фильтрация отменена.", reply_markup=None)
@@ -631,17 +676,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response = post_with_retry(f"{API_BASE_URL}/recommend", json={"book_id": book_id}, timeout=45)
             data = response.json()
             original_title = data.get("original_title_ru", "неизвестной книги")
-            recommendations = data.get("recommendations", [])
+            rec_items = data.get("recommendations", [])
             recommendations_en = data.get("recommendations_en", [])
             if recommendations_en:
                 context.user_data['last_recommendations_en'] = recommendations_en
-            if not recommendations:
+            if not rec_items:
                 await update.message.reply_text("😕 Для этой книги не нашлось рекомендаций.", reply_markup=get_main_keyboard())
                 return
             answer = f"📚 <b>Быстрые рекомендации для книги «{escape_html(original_title)}»:</b>\n\n"
-            for i, book in enumerate(recommendations[:10], 1):
+            for i, book in enumerate(rec_items[:10], 1):
                 safe_title = escape_html(book)
-                answer += f"{i}. {safe_title}\n"
+                answer += f"{i}. ID: <code>{item['id']}</code> — {escape_html(item['title_ru'])}\n"
             await update.message.reply_text(answer, parse_mode='HTML', reply_markup=get_main_keyboard())
             if recommendations_en:
                 keyboard = InlineKeyboardMarkup([
@@ -678,6 +723,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(handle_filter_callback, pattern="^filter_"))
     application.add_handler(CallbackQueryHandler(delete_rating_callback, pattern="^delete_rating$"))
     application.add_handler(CallbackQueryHandler(show_ratings_callback, pattern="^show_ratings$"))
+    application.add_handler(CallbackQueryHandler(handle_genre_callback, pattern="^genre_"))
 
     await application.bot.set_webhook(f"{URL}/telegram", allowed_updates=Update.ALL_TYPES)
 
